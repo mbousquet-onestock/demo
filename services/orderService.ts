@@ -114,9 +114,9 @@ export const generateOrderPayloads = (
     const orderPayload = {
       site_id: siteId,
       token: token,
-      parent_order_id: parentIdValue,
       order: {
         id: orderId,
+        parent_order_id: parentIdValue,
         types: orderTypes,
         sales_channel: salesChannel,
         date: now,
@@ -143,7 +143,8 @@ export const generateOrderPayloads = (
           },
           carrier: {
             name: "mock"
-          }
+          },
+          type: "standard"
         },
         delivery_promise: {
           original_delivery_option: {
