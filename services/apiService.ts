@@ -6,18 +6,29 @@ export const exportToOnestockApi = async (
   settings: AppSettings,
   onProgress: (msg: string) => void
 ): Promise<void> => {
-  const { apiUrl, siteId, token, salesChannel, fieldMapping } = settings;
+  const { apiUrl, siteId, token, salesChannel } = settings;
 
   const headers = {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${token}`
   };
 
-  const getValue = (p: Product, key: keyof AppSettings['fieldMapping']): string | undefined => {
-    const sourceField = fieldMapping[key];
+  const fixedMapping: Record<string, keyof Product | 'none'> = {
+    id: 'sku',
+    product_id: 'parentSku',
+    name: 'name',
+    color: 'color',
+    size: 'size',
+    image: 'imageUrl',
+    description: 'description',
+    brand: 'none',
+    price: 'price',
+    category: 'category'
+  };
+
+  const getValue = (p: Product, key: string): string | undefined => {
+    const sourceField = fixedMapping[key];
     if (!sourceField || sourceField === 'none') return undefined;
-    // Fix: Explicitly convert the value to string. 
-    // Product fields can be string, number, or string[], but this helper must return string | undefined.
     const val = p[sourceField as keyof Product];
     return val !== undefined ? String(val) : undefined;
   };
@@ -51,7 +62,7 @@ export const exportToOnestockApi = async (
       active: ["true"]
     };
 
-    const optionalFeatureKeys: (keyof AppSettings['fieldMapping'])[] = ['color', 'size', 'description', 'brand'];
+    const optionalFeatureKeys: string[] = ['color', 'size', 'description', 'brand'];
     optionalFeatureKeys.forEach(key => {
       const val = getValue(p, key);
       if (val) features[key] = [val];
@@ -104,46 +115,4 @@ export const exportToOnestockApi = async (
 
   if (!patchResponse.ok) throw new Error(`Failed to close session.`);
   onProgress('Import completed successfully!');
-};
-
-/**
- * Pushes stock levels to OneStock API
- */
-export const exportStockToOnestockApi = async (
-  stockData: { item_id: string; endpoint_id: string; quantity: number }[],
-  settings: AppSettings,
-  onProgress: (msg: string) => void
-): Promise<void> => {
-  const { apiUrl, siteId, token } = settings;
-
-  const headers = {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${token}`
-  };
-
-  onProgress('Constructing inventory payload...');
-  const payload = {
-    token: token,
-    site_id: siteId,
-    import: {
-      incremental: false
-    },
-    stocks: stockData
-  };
-
-  onProgress(`Synchronizing stock levels for ${stockData.length} item-endpoint pairs...`);
-  
-  // NOTE: OneStock usually uses /stock_imports for bulk updates
-  const response = await fetch(`${apiUrl}/stock_imports`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Stock Import Failed: ${errorText}`);
-  }
-
-  onProgress('Stock synchronization completed successfully.');
 };

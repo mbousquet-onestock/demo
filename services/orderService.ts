@@ -139,7 +139,7 @@ export const generateOrderPayloads = (
               },
               zip_code: deliveryAddressData.zip_code
             },
-            ...(request.type !== 'sfs' ? { endpoint_id: request.endpointId || getRandom(settings.stockEndpoints) } : {})
+            ...(request.type !== 'sfs' ? { endpoint_id: request.endpointId || (settings.endpoints.length > 0 ? getRandom(settings.endpoints.map(e => e.id)) : getRandom(settings.stockEndpoints)) } : {})
           },
           carrier: {
             name: "mock"

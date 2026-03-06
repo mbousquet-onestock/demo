@@ -79,11 +79,10 @@ const StepHistory: React.FC<StepHistoryProps> = ({ history, onViewItem, onNewImp
           };
           onImportJson(site);
         } else {
-          alert("Error: Unrecognized JSON format. File must be a OneStock items payload or a previous history export.");
+          console.error("Error: Unrecognized JSON format. File must be a OneStock items payload or a previous history export.");
         }
       } catch (err) {
-        alert("Critical Error: Failed to parse the JSON file.");
-        console.error(err);
+        console.error("Critical Error: Failed to parse the JSON file.", err);
       }
     };
     reader.readAsText(file);

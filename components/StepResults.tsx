@@ -3,6 +3,7 @@ import React, { useState, useMemo } from 'react';
 import { Product, AppSettings, GroundingSource } from '../types';
 import ImageModal from './ImageModal';
 import EditAssetModal from './EditAssetModal';
+import ProductEditModal from './ProductEditModal';
 
 interface StepResultsProps {
   products: Product[];
@@ -15,6 +16,8 @@ interface StepResultsProps {
   onCancel: () => void;
   onGenerateJson: (selectedProducts: Product[]) => void;
   onUpdateProduct: (product: Product) => void;
+  onAddProduct: (product: Product) => void;
+  onDeleteProduct: (id: string) => void;
   isHistoryView?: boolean;
 }
 
@@ -29,10 +32,13 @@ const StepResults: React.FC<StepResultsProps> = ({
   onCancel, 
   onGenerateJson, 
   onUpdateProduct,
+  onAddProduct,
+  onDeleteProduct,
   isHistoryView = false 
 }) => {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [editingAsset, setEditingAsset] = useState<Product | null>(null);
+  const [editingProduct, setEditingProduct] = useState<Product | null | 'new'>(null);
   const [isMassEditOpen, setIsMassEditOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   
@@ -79,6 +85,16 @@ const StepResults: React.FC<StepResultsProps> = ({
     onUpdateProduct({ ...product, [field]: value });
   };
 
+  const handleDuplicate = (product: Product) => {
+    const duplicatedProduct: Product = {
+      ...product,
+      id: Date.now().toString() + Math.random().toString(36).substring(2, 9),
+      sku: `${product.sku}-copy`,
+      name: `${product.name} (Copy)`
+    };
+    onAddProduct(duplicatedProduct);
+  };
+
   const applyMassEdit = () => {
     if (selectedIds.size === 0) return;
     
@@ -99,7 +115,6 @@ const StepResults: React.FC<StepResultsProps> = ({
   const handleDownloadJson = () => {
     const selected = products.filter(p => selectedIds.has(p.id));
     if (selected.length === 0) {
-      alert("Please select at least one article.");
       return;
     }
 
@@ -157,7 +172,7 @@ const StepResults: React.FC<StepResultsProps> = ({
     downloadAnchorNode.remove();
   };
 
-  const editableInputClass = "w-full bg-transparent border-none focus:ring-1 focus:ring-onestock-blue rounded px-1 py-0.5 text-inherit transition-all hover:bg-gray-50 focus:bg-white";
+  const editableInputClass = "w-full bg-transparent border-none focus:ring-1 focus:ring-onestock-blue rounded px-1 py-0.5 text-inherit font-sans transition-all hover:bg-gray-50 focus:bg-white";
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500 max-w-full relative pb-10">
@@ -174,6 +189,14 @@ const StepResults: React.FC<StepResultsProps> = ({
           product={editingAsset}
           onSave={(newUrl) => handleFieldChange(editingAsset, 'imageUrl', newUrl)}
           onClose={() => setEditingAsset(null)}
+        />
+      )}
+
+      {editingProduct && (
+        <ProductEditModal
+          product={editingProduct === 'new' ? null : editingProduct}
+          onSave={(p) => editingProduct === 'new' ? onAddProduct(p) : onUpdateProduct(p)}
+          onClose={() => setEditingProduct(null)}
         />
       )}
 
@@ -280,6 +303,14 @@ const StepResults: React.FC<StepResultsProps> = ({
           </div>
 
           <button 
+            onClick={() => setEditingProduct('new')}
+            className="px-3 py-2 text-xs font-bold text-emerald-600 border border-emerald-200 bg-emerald-50 rounded-lg hover:bg-emerald-100 transition-all flex items-center gap-2"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" /></svg>
+            Add Product
+          </button>
+
+          <button 
             onClick={() => setIsMassEditOpen(true)}
             disabled={selectedIds.size === 0}
             className="px-3 py-2 text-xs font-bold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-all flex items-center gap-2 disabled:opacity-30"
@@ -325,6 +356,7 @@ const StepResults: React.FC<StepResultsProps> = ({
                     onChange={toggleSelectAll}
                   />
                 </th>
+                <th className="px-4 py-4 text-[11px] font-bold text-gray-400 uppercase tracking-wider w-20 text-center">Actions</th>
                 <th className="px-4 py-4 text-[11px] font-bold text-gray-400 uppercase tracking-wider w-32 text-center">Asset</th>
                 <th className="px-4 py-4 text-[11px] font-bold text-gray-400 uppercase tracking-wider w-32">Unique SKU</th>
                 <th className="px-4 py-4 text-[11px] font-bold text-gray-400 uppercase tracking-wider w-48">Name</th>
@@ -344,6 +376,31 @@ const StepResults: React.FC<StepResultsProps> = ({
                       checked={selectedIds.has(product.id)}
                       onChange={() => toggleSelect(product.id)}
                     />
+                  </td>
+                  <td className="px-4 py-4 text-center">
+                    <div className="flex items-center justify-center gap-1">
+                      <button 
+                        onClick={() => setEditingProduct(product)}
+                        className="p-1.5 text-onestock-blue hover:bg-blue-50 rounded-lg transition-colors"
+                        title="Edit Product Details"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-5M18.364 5.636l-3.536 3.536m3.536-3.536L15.232 3.732a2.5 2.5 0 00-3.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                      </button>
+                      <button 
+                        onClick={() => handleDuplicate(product)}
+                        className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                        title="Duplicate Product"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" /></svg>
+                      </button>
+                      <button 
+                        onClick={() => onDeleteProduct(product.id)}
+                        className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                        title="Delete Product"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      </button>
+                    </div>
                   </td>
                   <td className="px-4 py-4">
                     <div className="flex flex-col items-center gap-1">
@@ -378,7 +435,7 @@ const StepResults: React.FC<StepResultsProps> = ({
                   </td>
                   <td className="px-4 py-4">
                     <input 
-                      className={`${editableInputClass} font-mono font-bold text-[#002D72] text-xs`}
+                      className={`${editableInputClass} font-bold text-[#002D72] text-xs`}
                       value={product.sku}
                       onChange={(e) => handleFieldChange(product, 'sku', e.target.value)}
                     />

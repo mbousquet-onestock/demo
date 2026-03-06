@@ -76,6 +76,36 @@ export const generateAIIdentities = async (countryCode: string, count: number): 
   }
 };
 
+export const geocodeAddress = async (city: string, countryCode: string = 'FR'): Promise<{ latitude: number, longitude: number } | null> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  
+  const prompt = `Provide the approximate GPS coordinates (latitude and longitude) for the city: ${city}, ${countryCode}.
+  Return ONLY a JSON object with "latitude" and "longitude" fields.`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            latitude: { type: Type.NUMBER },
+            longitude: { type: Type.NUMBER }
+          },
+          required: ["latitude", "longitude"]
+        }
+      }
+    });
+
+    return JSON.parse(response.text.trim());
+  } catch (error) {
+    console.error("Geocoding error:", error);
+    return null;
+  }
+};
+
 export const scanWebsiteForProducts = async (url: string, limit: number): Promise<ScanResult> => {
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   const productTarget = Math.max(1, Math.ceil(limit / 3));

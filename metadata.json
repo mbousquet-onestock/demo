@@ -1,5 +1,5 @@
 {
-  "name": "Copy of OneStock Product Importer v4",
+  "name": "OneStock Payload generator v5",
   "description": "An AI-powered tool to scan e-commerce websites, extract product data, and import them directly into the OneStock hosting environment.",
   "requestFramePermissions": []
 }

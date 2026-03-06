@@ -66,6 +66,24 @@ const App: React.FC = () => {
     setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
   };
 
+  const handleAddProduct = (newProduct: Product) => {
+    setProducts(prev => [newProduct, ...prev]);
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.add(newProduct.id);
+      return next;
+    });
+  };
+
+  const handleDeleteProduct = (id: string) => {
+    setProducts(prev => prev.filter(p => p.id !== id));
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  };
+
   const handleStartImport = () => {
     setCurrentStep(AppStep.IMPORTING);
   };
@@ -94,9 +112,8 @@ const App: React.FC = () => {
         if (prev.some(item => item.id === site.id)) return prev;
         return [site, ...prev];
       });
-      alert('Result successfully imported to history.');
     } else {
-      alert('Invalid JSON format.');
+      console.error('Invalid JSON format.');
     }
   };
 
@@ -206,6 +223,8 @@ const App: React.FC = () => {
                 onGenerateJson={handleGenerateJson}
                 isHistoryView={isViewingHistory}
                 onUpdateProduct={handleUpdateProduct}
+                onAddProduct={handleAddProduct}
+                onDeleteProduct={handleDeleteProduct}
               />
             )}
 

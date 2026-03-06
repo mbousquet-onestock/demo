@@ -1,7 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
 import { Product, AppSettings } from '../types';
-import StockExportModal from './StockExportModal';
 
 interface StepStockUpdateProps {
   products: Product[];
@@ -12,7 +11,6 @@ interface StepStockUpdateProps {
 const StepStockUpdate: React.FC<StepStockUpdateProps> = ({ products, settings, onCancel }) => {
   const [viewMode, setViewMode] = useState<'table' | 'payload'>('table');
   const [searchTerm, setSearchTerm] = useState('');
-  const [isExportingApi, setIsExportingApi] = useState(false);
   const [stockLevels, setStockLevels] = useState<Record<string, Record<string, number>>>(() => {
     const initial: Record<string, Record<string, number>> = {};
     products.forEach(p => {
@@ -190,14 +188,6 @@ const StepStockUpdate: React.FC<StepStockUpdateProps> = ({ products, settings, o
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
-      {isExportingApi && (
-        <StockExportModal 
-          stockData={getStockDataArray()} 
-          settings={settings} 
-          onClose={() => setIsExportingApi(false)} 
-        />
-      )}
-
       <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between bg-white px-8 py-6 rounded-2xl border border-gray-200 shadow-sm gap-4">
         <div>
           <h2 className="text-2xl font-bold text-[#002D72]">Inventory Management</h2>
@@ -218,7 +208,6 @@ const StepStockUpdate: React.FC<StepStockUpdateProps> = ({ products, settings, o
             />
           </div>
 
-          <button onClick={onCancel} className="px-3 py-2 text-xs font-bold text-gray-500 hover:text-red-500 transition-colors">Cancel</button>
           <button onClick={fillRandom} className="px-3 py-2 text-xs font-bold text-onestock-blue border border-onestock-blue rounded-lg hover:bg-blue-50 transition-all">Randomize (50% zeroes)</button>
           
           <button 
@@ -226,15 +215,6 @@ const StepStockUpdate: React.FC<StepStockUpdateProps> = ({ products, settings, o
             className="px-4 py-2 text-xs font-bold text-onestock-blue border border-onestock-blue rounded-lg hover:bg-blue-50 transition-all"
           >
             Review JSON
-          </button>
-
-          <button 
-            onClick={() => setIsExportingApi(true)}
-            disabled={!settings.token || !settings.siteId}
-            className="px-6 py-2 bg-[#002D72] text-white font-bold rounded-lg hover:bg-[#001F4D] shadow-lg flex items-center gap-2 transition-all text-sm disabled:opacity-30"
-          >
-            API Synchronize
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
           </button>
         </div>
       </div>
@@ -248,13 +228,6 @@ const StepStockUpdate: React.FC<StepStockUpdateProps> = ({ products, settings, o
                 <th key={ep} className="px-4 py-4 text-[10px] font-bold text-[#002D72] uppercase tracking-widest text-center border-l border-gray-100">
                   <div className="flex flex-col items-center gap-2">
                     <span>{ep}</span>
-                    <button 
-                      onClick={() => applyToColumn(ep)}
-                      className="text-[9px] bg-white border border-gray-200 px-2 py-0.5 rounded text-gray-400 hover:text-onestock-blue hover:border-onestock-blue transition-all"
-                      title="Apply value to all visible rows"
-                    >
-                      Apply to all
-                    </button>
                   </div>
                 </th>
               ))}

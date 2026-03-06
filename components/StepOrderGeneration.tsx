@@ -55,7 +55,7 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
 
   const handleGenerate = async () => {
     if (products.length === 0) {
-      alert("No products selected. Please go back and select items in Step 2.");
+      console.error("No products selected. Please go back and select items in Step 2.");
       return;
     }
 
@@ -112,8 +112,7 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
       downloadAnchorNode.click();
       downloadAnchorNode.remove();
     } catch (err) {
-      console.error(err);
-      alert("Failed to generate ZIP archive.");
+      console.error("Failed to generate ZIP archive:", err);
     } finally {
       setIsZipping(false);
     }
@@ -139,7 +138,6 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
             <p className="text-sm text-gray-500 mt-1">Simulate real customer traffic using AI-generated identities and technical payloads.</p>
           </div>
           <div className="flex gap-3">
-            <button onClick={onCancel} className="px-4 py-2 text-sm font-semibold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
             <button 
               onClick={handleGenerate}
               disabled={isGeneratingAI || products.length === 0}

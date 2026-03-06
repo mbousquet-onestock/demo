@@ -63,18 +63,6 @@ export interface AppSettings {
   defaultHeight: number;
   defaultWidth: number;
   defaultLength: number;
-  fieldMapping: {
-    id: keyof Product | 'none';
-    product_id: keyof Product | 'none';
-    name: keyof Product | 'none';
-    color: keyof Product | 'none';
-    size: keyof Product | 'none';
-    image: keyof Product | 'none';
-    description: keyof Product | 'none';
-    brand: keyof Product | 'none';
-    price: keyof Product | 'none';
-    category: keyof Product | 'none';
-  };
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -94,17 +82,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultWeight: 0.4,
   defaultHeight: 3,
   defaultWidth: 15,
-  defaultLength: 20,
-  fieldMapping: {
-    id: 'sku',
-    product_id: 'parentSku',
-    name: 'name',
-    color: 'color',
-    size: 'size',
-    image: 'imageUrl',
-    description: 'description',
-    brand: 'none',
-    price: 'price',
-    category: 'category'
-  }
+  defaultLength: 20
 };

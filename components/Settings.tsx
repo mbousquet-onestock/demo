@@ -1,6 +1,6 @@
 
 import React, { useState, useRef } from 'react';
-import { AppSettings, Product } from '../types';
+import { AppSettings } from '../types';
 
 interface SettingsProps {
   settings: AppSettings;
@@ -26,16 +26,6 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
     onSave({
       ...settings,
       [name]: type === 'number' ? parseFloat(value) : value,
-    });
-  };
-
-  const handleMappingChange = (onestockField: string, productField: string) => {
-    onSave({
-      ...settings,
-      fieldMapping: {
-        ...settings.fieldMapping,
-        [onestockField]: productField as keyof Product | 'none'
-      }
     });
   };
 
@@ -107,9 +97,8 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
           const importedList = Array.isArray(data) ? data : data[field];
           if (Array.isArray(importedList)) {
             onSave({ ...settings, [field]: importedList });
-            alert(`${field} imported successfully.`);
           } else {
-            alert(`Invalid format for ${field}. Expected an array.`);
+            console.error(`Invalid format for ${field}. Expected an array.`);
           }
         } else {
           // Global import
@@ -121,11 +110,10 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
               rulesets: Array.isArray(data.rulesets) ? data.rulesets : settings.rulesets,
               deliveryCountries: Array.isArray(data.deliveryCountries) ? data.deliveryCountries : settings.deliveryCountries
             });
-            alert("Business rules imported successfully.");
           }
         }
       } catch (err) {
-        alert("Failed to parse the JSON file.");
+        console.error("Failed to parse the JSON file.", err);
       }
     };
     reader.readAsText(file);
@@ -179,66 +167,6 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
       </div>
     </div>
   );
-
-  const productFields: (keyof Product | 'none')[] = [
-    'none', 'sku', 'parentSku', 'name', 'description', 'price', 'color', 'size', 'imageUrl'
-  ];
-
-  const coreFields = [
-    { key: 'id', label: 'Item ID (Unique SKU)', required: true, desc: 'Primary identifier for the article.' },
-    { key: 'product_id', label: 'Product ID (Mother ID)', required: true, desc: 'Groups multiple variants under one product.' },
-    { key: 'name', label: 'Label / Name', required: true, desc: 'Public display name of the item.' },
-  ];
-
-  const featureFields = [
-    { key: 'price', label: 'Unit Price', desc: 'Base price used if sales channel price is empty.' },
-    { key: 'description', label: 'Description', desc: 'Long text detailing the product.' },
-    { key: 'color', label: 'Color Variant', desc: 'The specific color of this SKU.' },
-    { key: 'size', label: 'Size Variant', desc: 'The specific size of this SKU.' },
-    { key: 'image', label: 'Main Image URL', desc: 'Direct link to the primary visual.' },
-    { key: 'brand', label: 'Brand Name', desc: 'Manufacturer or label name.' },
-    { key: 'category', label: 'Category Path', desc: 'Breadcrumb or category identifier.' },
-  ];
-
-  const renderMappingRow = (field: { key: string, label: string, required?: boolean, desc: string }) => {
-    const currentMapping = (settings.fieldMapping as any)[field.key];
-    const isMapped = currentMapping && currentMapping !== 'none';
-
-    return (
-      <div 
-        key={field.key} 
-        className={`grid grid-cols-12 gap-4 items-center p-4 rounded-xl transition-all border ${
-          isMapped ? 'bg-blue-50/40 border-blue-100' : 'bg-white border-transparent hover:bg-gray-50'
-        }`}
-      >
-        <div className="col-span-5">
-          <div className="flex items-center gap-2">
-            <span className={`text-sm font-bold ${isMapped ? 'text-[#002D72]' : 'text-gray-700'}`}>{field.label}</span>
-            {field.required && (
-              <span className="text-[8px] bg-red-50 text-red-600 px-1.5 py-0.5 rounded font-bold uppercase tracking-tighter">Required</span>
-            )}
-          </div>
-          <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">{field.desc}</p>
-        </div>
-        <div className="col-span-2 flex items-center justify-center">
-          <div className={`w-10 h-px ${isMapped ? 'bg-blue-300' : 'bg-gray-200'}`}></div>
-        </div>
-        <div className="col-span-5">
-          <select 
-            value={currentMapping || 'none'}
-            onChange={(e) => handleMappingChange(field.key, e.target.value)}
-            className={`w-full border rounded-lg px-3 py-2 text-sm font-medium outline-none transition-all ${
-              isMapped ? 'bg-white border-blue-300 text-[#002D72]' : 'bg-white border-gray-200 text-gray-400'
-            }`}
-          >
-            {productFields.map(pf => (
-              <option key={pf} value={pf}>{pf === 'none' ? '-- Unmapped --' : pf}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-    );
-  };
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-20">
@@ -363,29 +291,6 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
                   </button>
                 </div>
               ))}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
-        <div className="border-b border-gray-100 pb-6 mb-8">
-          <h2 className="text-2xl font-bold text-gray-900">Structural Field Mapping</h2>
-          <p className="text-gray-500 text-sm mt-1">Map AI extraction fields to the complete OneStock API schema.</p>
-        </div>
-
-        <div className="space-y-10">
-          <div>
-            <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-4 border-b border-gray-50 pb-2">Core Article Parameters</h4>
-            <div className="space-y-1">
-              {coreFields.map(renderMappingRow)}
-            </div>
-          </div>
-
-          <div>
-            <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-4 border-b border-gray-50 pb-2">Extended Localized Features</h4>
-            <div className="space-y-1">
-              {featureFields.map(renderMappingRow)}
             </div>
           </div>
         </div>

@@ -59,8 +59,8 @@ const Sidebar: React.FC<SidebarProps> = ({
         <ul className="space-y-2">
           {steps.map((step) => {
             const isActive = currentStep === step.id;
-            const needsProducts = [AppStep.STOCK_UPDATE, AppStep.ORDER_GENERATION, AppStep.RESULTS].includes(step.id);
-            const isClickable = [AppStep.HISTORY, AppStep.INPUT, AppStep.SETTINGS].includes(step.id) || (needsProducts && hasProducts);
+            const needsProducts = [AppStep.STOCK_UPDATE, AppStep.ORDER_GENERATION].includes(step.id);
+            const isClickable = [AppStep.HISTORY, AppStep.INPUT, AppStep.SETTINGS, AppStep.RESULTS].includes(step.id) || (needsProducts && hasProducts);
 
             return (
               <li key={step.id}>
