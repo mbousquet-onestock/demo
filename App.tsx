@@ -15,7 +15,7 @@ import StepJsonViewer from './components/StepJsonViewer';
 import StepOrderGeneration from './components/StepOrderGeneration';
 
 const App: React.FC = () => {
-  const [currentStep, setCurrentStep] = useState<AppStep>(AppStep.INPUT);
+  const [currentStep, setCurrentStep] = useState<AppStep>(AppStep.HISTORY);
   const [targetUrl, setTargetUrl] = useState('');
   const [targetLimit, setTargetLimit] = useState(10);
   const [products, setProducts] = useState<Product[]>([]);
@@ -132,7 +132,7 @@ const App: React.FC = () => {
     setGroundingSources([]);
     setSelectedIds(new Set());
     setIsViewingHistory(false);
-    setCurrentStep(AppStep.INPUT);
+    setCurrentStep(AppStep.HISTORY);
     setError(null);
   };
 
@@ -218,7 +218,6 @@ const App: React.FC = () => {
                 sources={groundingSources}
                 selectedIds={selectedIds}
                 onSelectionChange={setSelectedIds}
-                onImport={handleStartImport}
                 onCancel={reset}
                 onGenerateJson={handleGenerateJson}
                 isHistoryView={isViewingHistory}
@@ -245,7 +244,7 @@ const App: React.FC = () => {
             )}
             
             {currentStep === AppStep.SUCCESS && (
-              <StepSuccess onReset={() => setCurrentStep(AppStep.INPUT)} url={targetUrl} />
+              <StepSuccess onReset={() => setCurrentStep(AppStep.HISTORY)} url={targetUrl} />
             )}
             
             {error && (

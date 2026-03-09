@@ -49,6 +49,68 @@ export interface ProcessedSite {
   sources?: GroundingSource[];
 }
 
+export interface Endpoint {
+  id: string;
+  name: string;
+  sales_channel_id: string;
+  timezone: string;
+  workflow_id: string;
+  currency: string | null;
+  locked: any;
+  modules: {
+    cfs: boolean;
+    ckc: boolean;
+    ffs: boolean;
+    ois: boolean;
+    ropis: boolean;
+  };
+  address: {
+    id: string;
+    city: string;
+    contact: {
+      phone_number: string;
+      email: string;
+    };
+    coordinates: {
+      lon: number;
+      lat: number;
+    };
+    lines: string[];
+    regions: {
+      country: {
+        code: string;
+      };
+    };
+    zip_code: string;
+  };
+  classification: {
+    endpoint_type: string[];
+    scan_mode: string[];
+    store_profile: string[];
+  };
+  open: boolean;
+  opening_hours: {
+    id: string;
+    type: string;
+    timezone: string;
+    timespans: any[];
+  };
+  opening_hours_next_seven_days: {
+    opening_hours: any[];
+  };
+  execution_times: any;
+  configurations: {
+    order_in_store: {
+      catalog: boolean;
+      immediate_pickup: boolean;
+      delivery: boolean;
+    };
+    delivery_promise: {
+      milestones: boolean;
+    };
+  };
+}
+
 export interface AppSettings {
   apiName: string;
   apiUrl: string;
@@ -56,6 +118,7 @@ export interface AppSettings {
   token: string;
   salesChannel: string;
   stockEndpoints: string[];
+  endpoints: Endpoint[];
   orderSalesChannels: string[];
   deliveryCountries: { code: string; name: string }[];
   rulesets: string[];
@@ -72,6 +135,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   token: '{{token}}',
   salesChannel: 'sc_ois_1',
   stockEndpoints: ['Store_1', 'Store_2', 'Warehouse_Main'],
+  endpoints: [],
   orderSalesChannels: ['TikTok_Spain', 'Tefal_UK', 'Web_France', 'Mobile_App'],
   deliveryCountries: [
     { code: 'FR', name: 'France' },

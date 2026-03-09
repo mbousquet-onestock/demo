@@ -12,7 +12,6 @@ interface StepResultsProps {
   sources?: GroundingSource[];
   selectedIds: Set<string>;
   onSelectionChange: (ids: Set<string>) => void;
-  onImport: () => void;
   onCancel: () => void;
   onGenerateJson: (selectedProducts: Product[]) => void;
   onUpdateProduct: (product: Product) => void;
@@ -28,7 +27,6 @@ const StepResults: React.FC<StepResultsProps> = ({
   sources = [],
   selectedIds,
   onSelectionChange,
-  onImport, 
   onCancel, 
   onGenerateJson, 
   onUpdateProduct,
@@ -332,14 +330,7 @@ const StepResults: React.FC<StepResultsProps> = ({
             Download
           </button>
           
-          {!isHistoryView && (
-            <button 
-              onClick={onImport}
-              className="px-4 py-2 text-xs font-bold text-white bg-[#002D72] rounded-lg hover:bg-[#001F4D] shadow-sm transition-all flex items-center gap-2"
-            >
-              Validate & Import
-            </button>
-          )}
+          {/* Validate & Import button removed per user request */}
         </div>
       </div>
 
