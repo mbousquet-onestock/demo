@@ -43,6 +43,8 @@ const StepResults: React.FC<StepResultsProps> = ({
   const [massEditField, setMassEditField] = useState<keyof Product>('name');
   const [massEditValue, setMassEditValue] = useState('');
 
+  const [tableLang, setTableLang] = useState<'en' | 'fr'>('fr');
+
   const filteredProducts = useMemo(() => {
     if (!searchTerm.trim()) return products;
     const lowSearch = searchTerm.toLowerCase();
@@ -121,7 +123,7 @@ const StepResults: React.FC<StepResultsProps> = ({
       category_ids: [p.category],
       is_default: true,
       product_id: p.parentSku,
-      features: {
+      features: p.features || {
         en: {
           color: [p.color],
           departement: [p.department],
@@ -352,6 +354,15 @@ const StepResults: React.FC<StepResultsProps> = ({
                 <th className="px-4 py-4 text-[11px] font-bold text-gray-400 uppercase tracking-wider w-32">Unique SKU</th>
                 <th className="px-4 py-4 text-[11px] font-bold text-gray-400 uppercase tracking-wider w-48">Name</th>
                 <th className="px-4 py-4 text-[11px] font-bold text-gray-400 uppercase tracking-wider w-64">Description</th>
+                <th className="px-4 py-4 text-[11px] font-bold text-gray-400 uppercase tracking-wider w-64">
+                  <div className="flex items-center justify-between">
+                    <span>Features ({tableLang.toUpperCase()})</span>
+                    <div className="flex bg-gray-200 p-0.5 rounded text-[9px]">
+                      <button onClick={() => setTableLang('en')} className={`px-1.5 rounded ${tableLang === 'en' ? 'bg-white text-[#002D72]' : 'text-gray-500'}`}>EN</button>
+                      <button onClick={() => setTableLang('fr')} className={`px-1.5 rounded ${tableLang === 'fr' ? 'bg-white text-[#002D72]' : 'text-gray-500'}`}>FR</button>
+                    </div>
+                  </div>
+                </th>
                 <th className="px-4 py-4 text-[11px] font-bold text-gray-400 uppercase tracking-wider w-24 text-right">Price</th>
                 <th className="px-4 py-4 text-[11px] font-bold text-gray-400 uppercase tracking-wider w-20 text-center">Size</th>
                 <th className="px-4 py-4 text-[11px] font-bold text-gray-400 uppercase tracking-wider w-24 text-center">Weight(kg)</th>
@@ -444,6 +455,20 @@ const StepResults: React.FC<StepResultsProps> = ({
                       value={product.description}
                       onChange={(e) => handleFieldChange(product, 'description', e.target.value)}
                     />
+                  </td>
+                  <td className="px-4 py-4">
+                    <div className="flex flex-wrap gap-1 max-h-[80px] overflow-y-auto">
+                      {product.features && product.features[tableLang] ? (
+                        Object.entries(product.features[tableLang]).map(([k, v]) => (
+                          <span key={k} className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-gray-100 text-[9px] text-gray-600 border border-gray-200">
+                            <span className="font-bold mr-1">{k}:</span>
+                            <span className="truncate max-w-[60px]">{Array.isArray(v) ? v[0] : v}</span>
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-[10px] text-gray-400 italic">No features</span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-4 text-right">
                     <div className="flex items-center justify-end gap-1">

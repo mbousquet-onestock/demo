@@ -37,11 +37,11 @@ const StepHistory: React.FC<StepHistoryProps> = ({ history, onViewItem, onNewImp
         // Detect Standard ProcessedSite format
         if (data.id && data.products && Array.isArray(data.products)) {
           onImportJson(data);
-        } 
-        // Detect OneStock API Payload format (exported from Step 2)
+        }          // Detect OneStock API Payload format (exported from Step 2)
         else if (data.items && Array.isArray(data.items)) {
           const reconstructedProducts: Product[] = data.items.map((item: any) => {
             const en = item.features?.en || {};
+            const fr = item.features?.fr || {};
             const scf = item.sales_channels_features || {};
             const channelKey = Object.keys(scf)[0];
             const channelData = channelKey ? scf[channelKey] : {};
@@ -49,24 +49,25 @@ const StepHistory: React.FC<StepHistoryProps> = ({ history, onViewItem, onNewImp
             return {
               id: item.id,
               sku: item.id,
-              parentSku: item.product_id || '',
-              name: en.name?.[0] || 'Imported Product',
-              description: en.long_description?.[0] || '',
-              imageUrl: en.image?.[0] || '',
+              parentSku: item.product_id || fr.code_produit?.[0] || en.code_produit?.[0] || '',
+              name: fr.name?.[0] || en.name?.[0] || 'Imported Product',
+              description: fr.libelle_produit?.[0] || en.libelle_produit?.[0] || fr.long_description?.[0] || en.long_description?.[0] || '',
+              imageUrl: fr.image?.[0] || en.image?.[0] || '',
               productUrl: '#imported',
-              price: en.price?.[0]?.toString() || channelData.price?.toString() || '0',
+              price: fr.prix?.[0]?.toString() || en.price?.[0]?.toString() || channelData.price?.toString() || '0',
               comparePrice: channelData.compare_at_price?.toString() || '0',
               currency: channelData.currency || 'EUR',
-              color: en.color?.[0] || '',
-              size: en.size?.[0] || '',
-              category: item.category_ids?.[0] || '',
-              department: en.departement?.[0] || '', // match spelling from StepResults export
-              subdepartment: en.subdepartement?.[0] || '', // match spelling from StepResults export
-              weight: item.weight || 0,
+              color: fr.color?.[0] || en.color?.[0] || '',
+              size: fr.size?.[0] || en.size?.[0] || '',
+              category: item.category_ids?.[0] || fr.rayon?.[0] || en.rayon?.[0] || '',
+              department: fr.famille?.[0] || en.famille?.[0] || fr.departement?.[0] || en.departement?.[0] || '',
+              subdepartment: fr.sous_famille?.[0] || en.sous_famille?.[0] || fr.subdepartement?.[0] || en.subdepartement?.[0] || '',
+              weight: item.weight || fr.poids?.[0] || en.weight?.[0] || 0,
               length: item.length || 0,
               width: item.width || 0,
               height: item.height || 0,
-              images_big: en.images_big || []
+              images_big: fr.images_big || en.images_big || (fr.image ? [fr.image[0]] : []),
+              features: item.features
             };
           });
 

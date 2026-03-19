@@ -20,6 +20,11 @@ export interface Product {
   width: number;
   height: number;
   images_big: string[];
+  features?: {
+    [lang: string]: {
+      [key: string]: (string | number | boolean)[];
+    };
+  };
 }
 
 export interface GroundingSource {

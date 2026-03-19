@@ -197,7 +197,33 @@ export const scanWebsiteForProducts = async (url: string, limit: number): Promis
           length: 20,
           width: 15,
           height: 3,
-          images_big: p.images || []
+          images_big: p.images || [],
+          features: {
+            en: {
+              color: [p.color || "N/A"],
+              departement: [p.department || "General"],
+              subdepartement: [p.subdepartment || "General"],
+              image: [mainImg],
+              images_big: p.images || [],
+              long_description: [p.description || "No description"],
+              name: [p.name],
+              price: [(p.price || "0").toString()],
+              size: [size],
+              weight: [0.4]
+            },
+            fr: {
+              color: [p.color || "N/A"],
+              departement: [p.department || "General"],
+              subdepartement: [p.subdepartment || "General"],
+              image: [mainImg],
+              images_big: p.images || [],
+              long_description: [p.description || "No description"],
+              name: [p.name],
+              price: [(p.price || "0").toString()],
+              size: [size],
+              weight: [0.4]
+            }
+          }
         });
       }
     }

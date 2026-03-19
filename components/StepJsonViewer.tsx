@@ -16,7 +16,7 @@ const StepJsonViewer: React.FC<StepJsonViewerProps> = ({ selectedProducts, setti
       category_ids: [p.category],
       is_default: true,
       product_id: p.parentSku,
-      features: {
+      features: p.features || {
         en: {
           color: [p.color],
           departement: [p.department],
