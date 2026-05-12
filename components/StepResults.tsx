@@ -118,49 +118,62 @@ const StepResults: React.FC<StepResultsProps> = ({
       return;
     }
 
-    const items = selected.map(p => ({
-      id: p.sku,
-      category_ids: [p.category],
-      is_default: true,
-      product_id: p.parentSku,
-      features: p.features || {
-        en: {
-          color: [p.color],
-          departement: [p.department],
-          subdepartement: [p.subdepartment],
-          image: [p.imageUrl],
-          images_big: [p.imageUrl],
-          long_description: [p.description],
-          name: [p.name],
-          price: [p.price],
-          size: [p.size],
-          weight: [p.weight]
+    const items = selected.map(p => {
+      let features: any = null;
+      if (p.features) {
+        features = JSON.parse(JSON.stringify(p.features));
+        Object.keys(features).forEach(lang => {
+          if (features[lang].libelle_produit) {
+            features[lang].name = features[lang].libelle_produit;
+            delete features[lang].libelle_produit;
+          }
+        });
+      }
+
+      return {
+        id: p.sku,
+        category_ids: [p.category],
+        is_default: true,
+        product_id: p.parentSku,
+        features: features || {
+          en: {
+            color: [p.color],
+            departement: [p.department],
+            subdepartement: [p.subdepartment],
+            image: [p.imageUrl],
+            images_big: [p.imageUrl],
+            long_description: [p.description],
+            name: [p.description], // libelle_produit renamed to name
+            price: [p.price],
+            size: [p.size],
+            weight: [p.weight]
+          },
+          fr: {
+            color: [p.color],
+            departement: [p.department],
+            subdepartement: [p.subdepartment],
+            image: [p.imageUrl],
+            images_big: [p.imageUrl],
+            long_description: [p.description],
+            name: [p.description], // libelle_produit renamed to name
+            price: [p.price],
+            size: [p.size],
+            weight: [p.weight]
+          }
         },
-        fr: {
-          color: [p.color],
-          departement: [p.department],
-          subdepartement: [p.subdepartment],
-          image: [p.imageUrl],
-          images_big: [p.imageUrl],
-          long_description: [p.description],
-          name: [p.name],
-          price: [p.price],
-          size: [p.size],
-          weight: [p.weight]
-        }
-      },
-      sales_channels_features: {
-        [settings.salesChannel]: {
-          compare_at_price: parseFloat(p.comparePrice || "0"),
-          currency: p.currency,
-          price: parseFloat(p.price)
-        }
-      },
-      length: p.length,
-      width: p.width,
-      height: p.height,
-      weight: p.weight
-    }));
+        sales_channels_features: {
+          [settings.salesChannel]: {
+            compare_at_price: parseFloat(p.comparePrice || "0"),
+            currency: p.currency,
+            price: parseFloat(p.price)
+          }
+        },
+        length: p.length,
+        width: p.width,
+        height: p.height,
+        weight: p.weight
+      };
+    });
 
     const jsonContent = JSON.stringify({ items }, null, 4);
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(jsonContent);

@@ -14,21 +14,30 @@ export interface OrderGenerationRequest {
   endpointId?: string;
 }
 
-const FALLBACK_COUNTRY_DATA: Record<string, { firstNames: string[], lastNames: string[], addresses: { city: string, zip_code: string, lines: string[] }[] }> = {
+const FALLBACK_COUNTRY_DATA: Record<string, { currency: string, firstNames: string[], lastNames: string[], addresses: { city: string, zip_code: string, lines: string[] }[] }> = {
   FR: {
+    currency: "EUR",
     firstNames: ["Jean", "Marie", "William", "Elena", "Lucas", "Sophie", "Inès", "Pablo", "Oliver", "Amelia", "Théo", "Léa", "Manon", "Gabriel"],
     lastNames: ["Dupont", "Lefebvre", "Martin", "Bernard", "Dubois", "Thomas", "Robert", "Richard", "Petit", "Durand"],
     addresses: [{ city: "Toulouse", zip_code: "31400", lines: ["8 Rue des Trente-Six Ponts"] }]
   },
   GB: {
+    currency: "GBP",
     firstNames: ["James", "Mary", "Robert"],
     lastNames: ["Smith", "Jones", "Taylor"],
     addresses: [{ city: "London", zip_code: "W1U 1EE", lines: ["10-12 James St"] }]
   },
   ES: {
+    currency: "EUR",
     firstNames: ["Antonio", "Maria", "Jose"],
     lastNames: ["Garcia", "Rodriguez", "Gonzalez"],
     addresses: [{ city: "Madrid", zip_code: "28001", lines: ["Calle de Serrano, 1"] }]
+  },
+  CH: {
+    currency: "CHF",
+    firstNames: ["Lukas", "Sophie", "Thomas", "Anna", "Jakob", "Julia", "Marc", "Heidi"],
+    lastNames: ["Müller", "Schmidt", "Schneider", "Fischer", "Meyer", "Weber", "Favre", "Rossi"],
+    addresses: [{ city: "Zürich", zip_code: "8001", lines: ["Bahnhofstrasse 1"] }, { city: "Geneva", zip_code: "1201", lines: ["Rue du Rhône 10"] }]
   }
 };
 
@@ -63,7 +72,7 @@ export const generateOrderPayloads = (
 
   const orders: any[] = [];
   let totalParentPrice = 0;
-  const currency = availableProducts[0]?.currency || "EUR";
+  const currency = fallbackLocalData.currency || availableProducts[0]?.currency || "EUR";
 
   for (let i = 0; i < request.count; i++) {
     const currentAiId = aiIdentities && aiIdentities[i] ? aiIdentities[i] : null;

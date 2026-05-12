@@ -11,38 +11,50 @@ const StepJsonViewer: React.FC<StepJsonViewerProps> = ({ selectedProducts, setti
   const [copySuccess, setCopySuccess] = useState(false);
 
   const generateJson = () => {
-    const items = selectedProducts.map(p => ({
-      id: p.sku,
-      category_ids: [p.category],
-      is_default: true,
-      product_id: p.parentSku,
-      features: p.features || {
-        en: {
-          color: [p.color],
-          departement: [p.department],
-          subdepartement: [p.subdepartment],
-          image: [p.imageUrl],
-          images_big: [p.imageUrl], // Mise à jour : images_big = [imageUrl]
-          long_description: [p.description],
-          name: [p.name],
-          price: [p.price],
-          size: [p.size],
-          weight: [p.weight]
+    const items = selectedProducts.map(p => {
+      let features: any = null;
+      if (p.features) {
+        features = JSON.parse(JSON.stringify(p.features));
+        Object.keys(features).forEach(lang => {
+          if (features[lang].libelle_produit) {
+            features[lang].name = features[lang].libelle_produit;
+            delete features[lang].libelle_produit;
+          }
+        });
+      }
+
+      return {
+        id: p.sku,
+        category_ids: [p.category],
+        is_default: true,
+        product_id: p.parentSku,
+        features: features || {
+          en: {
+            color: [p.color],
+            departement: [p.department],
+            subdepartement: [p.subdepartment],
+            image: [p.imageUrl],
+            images_big: [p.imageUrl],
+            long_description: [p.description],
+            name: [p.description], // libelle_produit renamed to name
+            price: [p.price],
+            size: [p.size],
+            weight: [p.weight]
+          },
+          fr: {
+            color: [p.color],
+            departement: [p.department],
+            subdepartement: [p.subdepartment],
+            image: [p.imageUrl],
+            images_big: [p.imageUrl],
+            long_description: [p.description],
+            name: [p.description], // libelle_produit renamed to name
+            price: [p.price],
+            size: [p.size],
+            weight: [p.weight]
+          }
         },
-        fr: {
-          color: [p.color],
-          departement: [p.department],
-          subdepartement: [p.subdepartment],
-          image: [p.imageUrl],
-          images_big: [p.imageUrl], // Mise à jour : images_big = [imageUrl]
-          long_description: [p.description],
-          name: [p.name],
-          price: [p.price],
-          size: [p.size],
-          weight: [p.weight]
-        }
-      },
-      sales_channels_features: {
+        sales_channels_features: {
         [settings.salesChannel]: {
           compare_at_price: parseFloat(p.comparePrice || "0"),
           currency: p.currency,
@@ -53,7 +65,8 @@ const StepJsonViewer: React.FC<StepJsonViewerProps> = ({ selectedProducts, setti
       width: p.width,
       height: p.height,
       weight: p.weight
-    }));
+    };
+  });
 
     return JSON.stringify({ items }, null, 4);
   };

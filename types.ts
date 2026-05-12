@@ -145,7 +145,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   deliveryCountries: [
     { code: 'FR', name: 'France' },
     { code: 'GB', name: 'United Kingdom' },
-    { code: 'ES', name: 'Spain' }
+    { code: 'ES', name: 'Spain' },
+    { code: 'CH', name: 'Switzerland' }
   ],
   rulesets: ['ruleset_ckc_01', 'ruleset_sfs_02'],
   defaultWeight: 0.4,
