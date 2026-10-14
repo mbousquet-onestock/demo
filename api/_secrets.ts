@@ -1,10 +1,10 @@
-// Encryption at rest of the secrets stored in the database (fields named "token" or "password").
+// Encryption at rest of the secrets stored in the database (fields named "token", "password" or "openaiApiKey").
 // AES-256-GCM, key derived from TOKEN_ENCRYPTION_KEY (or APP_ACCESS_KEY when it is not set).
 // The browser always sees clear values: encryption / decryption happen in the data API only.
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
 
 const PREFIX = 'enc:v1:';
-const SECRET_FIELDS = ['token', 'password'];
+const SECRET_FIELDS = ['token', 'password', 'openaiapikey'];
 
 let cachedKey: { secret: string; key: Buffer } | null = null;
 

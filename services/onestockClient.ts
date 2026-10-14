@@ -163,6 +163,6 @@ export const describeCallError = (envelope: ProxyResponseEnvelope): string => {
   // OneStock answers 401, or 400 with "auth_error", when the token is rejected.
   const authError = envelope.status === 401 || (envelope.body as any)?.error === 'auth_error';
   return authError
-    ? `${describeError(envelope)} — the token is expired or invalid: paste a new one in API Settings.`
+    ? `${describeError(envelope)} → paste a new token in API Settings.`
     : describeError(envelope);
 };

@@ -27,7 +27,7 @@ const MAX_BODY_CHARS = 100_000;
 export const apiLogStore = createPersistedStore<ApiLogEntry[]>('onestock_api_log', []);
 export const apiLogEnabledStore = createPersistedStore<boolean>('onestock_api_log_enabled', true);
 
-const SECRET_KEYS = ['token', 'password', 'auth-password'];
+const SECRET_KEYS = ['token', 'password', 'auth-password', 'apikey', 'openaiapikey'];
 
 // Hides secrets (token, password) wherever they appear in a payload.
 export const redactSecrets = (value: unknown): unknown => {

@@ -3,6 +3,7 @@ import { defineConfig, loadEnv, Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { handleProxyRequest } from './api/_proxyCore';
 import { handleDataRequest } from './api/_dataCore';
+import { handleAiRequest } from './api/_aiCore';
 
 // Serves the /api functions during `vite dev` / `vite preview` with the same logic as on Vercel.
 const apiMiddleware = (route: string, handler: (request: Request) => Promise<Response>) => async (req: any, res: any) => {
@@ -31,6 +32,7 @@ const apiMiddleware = (route: string, handler: (request: Request) => Promise<Res
 const mountApi = (middlewares: any) => {
   middlewares.use('/api/proxy', apiMiddleware('/api/proxy', handleProxyRequest));
   middlewares.use('/api/data', apiMiddleware('/api/data', handleDataRequest));
+  middlewares.use('/api/ai', apiMiddleware('/api/ai', handleAiRequest));
 };
 
 const onestockApiDevPlugin = (): Plugin => ({
@@ -42,7 +44,7 @@ const onestockApiDevPlugin = (): Plugin => ({
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     // Server-side variables used by the local /api middleware (read from .env.local).
-    for (const key of ['PROXY_ALLOWED_HOSTS', 'DATABASE_URL', 'POSTGRES_URL', 'APP_ACCESS_KEY', 'TOKEN_ENCRYPTION_KEY', 'NEON_FETCH_ENDPOINT']) {
+    for (const key of ['PROXY_ALLOWED_HOSTS', 'DATABASE_URL', 'POSTGRES_URL', 'APP_ACCESS_KEY', 'TOKEN_ENCRYPTION_KEY', 'OPENAI_API_KEY', 'NEON_FETCH_ENDPOINT']) {
       if (env[key]) process.env[key] = env[key];
     }
     return {

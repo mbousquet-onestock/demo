@@ -44,7 +44,8 @@ export enum AppStep {
   JSON_VIEWER = 'JSON_VIEWER',
   ORDER_GENERATION = 'ORDER_GENERATION',
   API_EXPLORER = 'API_EXPLORER',
-  API_LOG = 'API_LOG'
+  API_LOG = 'API_LOG',
+  STOCK_POINTS = 'STOCK_POINTS'
 }
 
 export interface ProcessedSite {
@@ -126,6 +127,9 @@ export interface AppSettings {
   siteId: string;
   // Token used by every call (stored encrypted in the database).
   token: string;
+  // OpenAI key for AI generation (optional when OPENAI_API_KEY is set on the server; stored encrypted).
+  openaiApiKey?: string;
+  openaiModel?: string;
   salesChannel: string;
   stockEndpoints: string[];
   endpoints: Endpoint[];
@@ -189,4 +193,46 @@ export interface OnestockGetEndpoint {
   bodyFields: string[];
   exampleBody: Record<string, unknown> | null;
   versions: OnestockApiVersion[];
+}
+
+// A OneStock stock location ("endpoint") as sent to POST /endpoints.
+export interface StockPointDraft {
+  id: string;
+  name: string;
+  address?: {
+    lines?: string[];
+    city?: string;
+    zip_code?: string;
+    regions?: { country?: { code?: string; name?: string } };
+    coordinates?: { lat?: number; lon?: number };
+    contact?: { email?: string; phone_number?: string };
+  };
+  timezone?: string;
+  classification?: Record<string, string[]>;
+  modules?: { ffs?: boolean; ckc?: boolean; cfs?: boolean; ropis?: boolean };
+  [key: string]: unknown;
+}
+
+export interface StockPointPushResult {
+  ok: boolean;
+  status: number | null;
+  message: string;
+  at: string;
+  requestId?: string;
+}
+
+// A generated set of stock points, saved and filed under a project.
+export interface StockPointSet {
+  id: string;
+  name: string;
+  project?: string;
+  context: string;
+  count: number;
+  idPrefix?: string;
+  model?: string;
+  createdAt: string;
+  updatedAt: string;
+  endpoints: StockPointDraft[];
+  // Creation result per endpoint id (POST /endpoints).
+  pushResults?: Record<string, StockPointPushResult>;
 }

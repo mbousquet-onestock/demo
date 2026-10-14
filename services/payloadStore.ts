@@ -32,8 +32,8 @@ export const updateSavedPayload = (id: string, patch: Partial<SavedPayload>) => 
   savedPayloadsStore.set(prev => prev.map(p => (p.id === id ? { ...p, ...patch } : p)));
 };
 
-export const listProjects = (payloads: SavedPayload[]): string[] =>
-  Array.from(new Set(payloads.map(p => (p.project || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+export const listProjects = (entries: { project?: string }[]): string[] =>
+  Array.from(new Set(entries.map(p => (p.project || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
 
 // Remembers the last project typed in this browser, to prefill the next save.
 const LAST_PROJECT_KEY = 'onestock_last_project';

@@ -2,7 +2,7 @@
 // localStorage stays as an offline cache; the database is the shared copy across browsers.
 import type { DataCollection, DataDocument } from '../api/_dataCore';
 import { createStore, Store } from './persistedStore';
-import { historyStore, settingsStore } from './appStores';
+import { historyStore, settingsStore, stockPointSetsStore } from './appStores';
 import { hasRealValue } from './onestockClient';
 import { savedPayloadsStore } from './payloadStore';
 
@@ -35,6 +35,7 @@ const byDesc = (key: string) => (a: any, b: any) => String(b[key] ?? '').localeC
 const BINDINGS: Binding[] = [
   { collection: 'history', store: historyStore, kind: 'list', sort: byDesc('id') },
   { collection: 'saved_payloads', store: savedPayloadsStore, kind: 'list', sort: byDesc('createdAt') },
+  { collection: 'stock_point_sets', store: stockPointSetsStore, kind: 'list', sort: byDesc('updatedAt') },
   { collection: 'settings', store: settingsStore, kind: 'value', docId: 'app_settings' },
 ];
 

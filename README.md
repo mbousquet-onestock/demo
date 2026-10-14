@@ -30,6 +30,11 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
 - **API Settings**: API URL (qualif / prod shortcuts), version, site ID and token (paste the token returned by
   `POST /login`). Every call uses them; payloads keep `{{site_id}}` / `{{token}}` variables, resolved at call time.
   "Test token" calls `GET /sales_channels`.
+- **Stock Points**: describe a network (context) and a count; OpenAI generates OneStock stock locations through
+  `api/ai.ts` (batches of 25). Review them in a table and on a map, edit them, save the set under a project (synced
+  to the database) and create them with `POST /endpoints` (one call per point, or bulk), with the result per point.
+  OpenAI key: `OPENAI_API_KEY` on Vercel (usable only with the database access key), or a key typed in the tab
+  (stored encrypted). Model configurable (default `gpt-4.1-mini`).
 - **API Explorer**: all GET routes of the OneStock spec (`data/onestockGetEndpoints.json`, generated from the
   OpenAPI file). Requests / results are saved with a required name and an optional project, and listed by project.
   `GET /items` results can be opened in the Product Manager.
