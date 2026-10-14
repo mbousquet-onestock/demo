@@ -2,6 +2,7 @@
 // Used by the Vercel function (api/data.ts) and by the Vite dev / preview middleware.
 import { neon, neonConfig } from '@neondatabase/serverless';
 import { timingSafeEqual } from 'node:crypto';
+import { encryptSecrets, decryptSecrets, hasPlainSecrets } from './_secrets.js';
 
 export const DATA_COLLECTIONS = ['history', 'connections', 'saved_payloads', 'settings', 'app_state'] as const;
 export type DataCollection = typeof DATA_COLLECTIONS[number];
@@ -88,11 +89,21 @@ export const handleDataRequest = async (request: Request): Promise<Response> => 
         LIMIT ${MAX_PAGE_ROWS}` as { id: string; data: string; updated_at: string }[];
 
       const documents: DataDocument[] = [];
+      const toEncrypt: { id: string; data: unknown }[] = [];
       let size = 0;
       for (const row of rows) {
         if (documents.length > 0 && size + row.data.length > MAX_PAGE_BYTES) break;
         size += row.data.length;
-        documents.push({ id: row.id, data: JSON.parse(row.data), updatedAt: new Date(row.updated_at).toISOString() });
+        const stored = JSON.parse(row.data);
+        // Documents written before encryption existed are re-saved encrypted.
+        if (hasPlainSecrets(stored)) toEncrypt.push({ id: row.id, data: encryptSecrets(stored) });
+        documents.push({ id: row.id, data: decryptSecrets(stored), updatedAt: new Date(row.updated_at).toISOString() });
+      }
+      if (toEncrypt.length > 0) {
+        await sql`
+          UPDATE app_documents AS d SET data = x.data
+          FROM jsonb_to_recordset(${JSON.stringify(toEncrypt)}::jsonb) AS x(id text, data jsonb)
+          WHERE d.collection = ${collection} AND d.id = x.id`;
       }
       const hasMore = documents.length < rows.length || rows.length === MAX_PAGE_ROWS;
       return json(200, { documents, nextCursor: hasMore ? documents[documents.length - 1]?.id ?? null : null });
@@ -104,7 +115,9 @@ export const handleDataRequest = async (request: Request): Promise<Response> => 
         { collection?: unknown; upserts?: { id: string; data: unknown }[]; deletes?: string[] } | null;
       if (!body || !isCollection(body.collection)) return json(400, { error: 'Missing or unknown collection.' });
       const collection = body.collection;
-      const upserts = Array.isArray(body.upserts) ? body.upserts.filter(u => u && typeof u.id === 'string' && u.id) : [];
+      // Tokens / passwords are encrypted before they reach the database.
+      const upserts = (Array.isArray(body.upserts) ? body.upserts.filter(u => u && typeof u.id === 'string' && u.id) : [])
+        .map(u => ({ id: u.id, data: encryptSecrets(u.data) }));
       const deletes = Array.isArray(body.deletes) ? body.deletes.filter(id => typeof id === 'string') : [];
 
       if (upserts.length > 0) {

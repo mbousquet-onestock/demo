@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Product, AppSettings, SavedPayload } from '../types';
 import { buildItemsPayload, regenerateProductIds, RegenerateIdsOptions, extractOnestockItems } from '../utils/payloadUtils';
-import { onestockRequest, useActiveConnection, describeError, ProxyResponseEnvelope, SITE_ID_VAR, TOKEN_VAR } from '../services/onestockClient';
+import { onestockRequest, useApiTarget, missingTargetFields, isProductionTarget, describeCallError, ProxyResponseEnvelope, SITE_ID_VAR, TOKEN_VAR } from '../services/onestockClient';
 import { savePayload, downloadJson, savedPayloadsStore, listProjects, getLastProject, setLastProject } from '../services/payloadStore';
 
 const labelClass = 'block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5';
@@ -119,7 +119,8 @@ interface ItemsPushDrawerProps {
 }
 
 export const ItemsPushDrawer: React.FC<ItemsPushDrawerProps> = ({ products, settings, onClose }) => {
-  const connection = useActiveConnection();
+  const target = useApiTarget();
+  const targetMissing = missingTargetFields(target);
   const [method, setMethod] = useState<'PATCH' | 'POST'>('PATCH');
   const [aggregate, setAggregate] = useState(false);
   const [onlyIfExists, setOnlyIfExists] = useState(false);
@@ -152,7 +153,7 @@ export const ItemsPushDrawer: React.FC<ItemsPushDrawerProps> = ({ products, sett
       method,
       path: '/items',
       url: withResult ? result?.url : undefined,
-      connectionName: connection?.name,
+      connectionName: target.siteId || undefined,
       request: withResult && result ? result.request : payload,
       response: withResult ? result?.envelope.body : undefined,
       status: withResult ? result?.envelope.status : undefined,
@@ -162,15 +163,15 @@ export const ItemsPushDrawer: React.FC<ItemsPushDrawerProps> = ({ products, sett
   };
 
   const handleSend = async () => {
-    if (!connection) return;
-    if (connection.environment === 'prod' && !window.confirm(`Send ${products.length} item(s) to PRODUCTION (${connection.siteId})?`)) return;
+    if (targetMissing) return;
+    if (isProductionTarget(target) && !window.confirm(`Send ${products.length} item(s) to ${target.baseUrl} (site ${target.siteId})? This is not a qualification URL.`)) return;
     setSending(true);
     setError(null);
     setNotice(null);
     try {
       const res = await onestockRequest({ method, path: '/items', body: payload });
       setResult({ url: res.url, request: res.requestTemplate, envelope: res.envelope });
-      if (!res.envelope.ok) setError(describeError(res.envelope));
+      if (!res.envelope.ok) setError(describeCallError(res.envelope));
     } catch (err: any) {
       setError(err?.message || String(err));
     } finally {
@@ -183,9 +184,9 @@ export const ItemsPushDrawer: React.FC<ItemsPushDrawerProps> = ({ products, sett
       <div className="space-y-5">
         <p className="text-sm text-gray-500">
           Payload for <strong>{products.length}</strong> selected product(s) on sales channel <strong>{settings.salesChannel}</strong>.
-          Target connection: {connection
-            ? <strong>{connection.name} ({connection.siteId}, {connection.environment})</strong>
-            : <span className="text-red-600 font-semibold">none — create one in "Connections"</span>}.
+          Target: {targetMissing
+            ? <span className="text-red-600 font-semibold">missing in API Settings: {targetMissing}</span>
+            : <strong>{target.siteId} · {target.baseUrl}</strong>}.
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -201,7 +202,7 @@ export const ItemsPushDrawer: React.FC<ItemsPushDrawerProps> = ({ products, sett
         </div>
 
         <div>
-          <label className={labelClass}>{'Payload — {{site_id}} / {{token}} replaced by the active connection values at send time'}</label>
+          <label className={labelClass}>{'Payload — {{site_id}} / {{token}} replaced by the API Settings values at send time'}</label>
           <pre className="max-h-[35vh] overflow-auto bg-[#001F4D] text-blue-100 font-mono text-[11px] p-4 rounded-lg whitespace-pre-wrap break-all">
             {JSON.stringify(payload, null, 2)}
           </pre>
@@ -215,7 +216,7 @@ export const ItemsPushDrawer: React.FC<ItemsPushDrawerProps> = ({ products, sett
           <button onClick={() => downloadJson(payload, `onestock_items_${Date.now()}`)} className="px-3 py-2 text-xs font-bold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">Download</button>
           <button
             onClick={handleSend}
-            disabled={sending || !connection || products.length === 0}
+            disabled={sending || !!targetMissing || products.length === 0}
             className="px-5 py-2 text-xs font-bold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-40"
           >
             {sending ? 'Sending…' : `${method} /items`}

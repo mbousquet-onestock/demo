@@ -1,5 +1,5 @@
-import { AppSettings, ConnectionInstance, OnestockApiVersion } from '../types';
-import { createPersistedStore } from './persistedStore';
+import { AppSettings, OnestockApiVersion } from '../types';
+import { settingsStore } from './appStores';
 import { logApiCall } from './apiLog';
 import type { ProxyResponseEnvelope } from '../api/_proxyCore';
 
@@ -8,61 +8,54 @@ export type { ProxyResponseEnvelope };
 // All OneStock calls go through the Vercel function (see api/proxy.ts).
 export const PROXY_ENDPOINT = '/api/proxy';
 
-export const connectionsStore = createPersistedStore<ConnectionInstance[]>('onestock_connections', []);
-export const activeConnectionIdStore = createPersistedStore<string | null>('onestock_active_connection', null);
+// Payloads carry these variables (Postman style); the real site / token typed in API Settings
+// are only substituted at call time, so shown, saved or downloaded payloads never hold a token.
+export const SITE_ID_VAR = '{{site_id}}';
+export const TOKEN_VAR = '{{token}}';
 
-export const getActiveConnection = (): ConnectionInstance | null => {
-  const id = activeConnectionIdStore.get();
-  return connectionsStore.get().find(c => c.id === id) || null;
-};
+const isPlaceholder = (value: string) => /^\{\{\s*[\w.-]+\s*\}\}$/.test(value.trim());
 
-export const useActiveConnection = (): ConnectionInstance | null => {
-  const connections = connectionsStore.use();
-  const activeId = activeConnectionIdStore.use();
-  return connections.find(c => c.id === activeId) || null;
-};
+// True when a real value (not empty, not a {{variable}} placeholder) is set.
+export const hasRealValue = (value?: string) => !!value && !!value.trim() && !isPlaceholder(value);
 
-export const updateConnection = (id: string, patch: Partial<ConnectionInstance>) => {
-  connectionsStore.set(prev => prev.map(c => (c.id === id ? { ...c, ...patch } : c)));
-};
+export const QUALIF_URL_TEMPLATE = 'https://{site_id}.api.qualif.onestock-retail.com';
+export const PROD_URL_TEMPLATE = 'https://{site_id}.api.onestock-retail.com';
 
-// URL deduced from the environment and the site ID (used when no API URL is typed).
-export const getDefaultBaseUrl = (conn: Pick<ConnectionInstance, 'environment' | 'siteId'>): string => {
-  if (conn.environment === 'custom') return '';
-  const env = conn.environment === 'qualif' ? '.qualif' : '';
-  return `https://${conn.siteId || '{site_id}'}.api${env}.onestock-retail.com`;
-};
+// Where and how the app calls OneStock: everything comes from API Settings.
+export interface ApiTarget {
+  baseUrl: string;
+  siteId: string;
+  token: string;
+  version: OnestockApiVersion;
+}
 
-// A typed API URL always wins over the environment default.
-export const getBaseUrl = (conn: Pick<ConnectionInstance, 'environment' | 'customBaseUrl' | 'siteId'>): string => {
-  const typed = (conn.customBaseUrl || '').trim().replace(/\/+$/, '');
-  return typed || getDefaultBaseUrl(conn);
-};
-
-export const buildUrl = (
-  conn: Pick<ConnectionInstance, 'environment' | 'customBaseUrl' | 'siteId' | 'version'>,
-  path: string,
-  version?: OnestockApiVersion
-): string => {
-  const base = getBaseUrl(conn);
-  const cleanPath = path.startsWith('/') ? path : `/${path}`;
-  // A custom base URL may already carry the version segment.
-  if (/\/v\d+$/.test(base)) return `${base}${cleanPath}`;
-  return `${base}/${version || conn.version}${cleanPath}`;
-};
-
-// Legacy fallback: the URL / site / token typed by hand in API Settings.
-export const connectionFromSettings = (settings: AppSettings): ConnectionInstance => ({
-  id: '__settings__',
-  name: settings.apiName || 'API Settings',
-  environment: 'custom',
-  customBaseUrl: settings.apiUrl,
-  version: 'v1',
-  siteId: settings.siteId,
-  userId: '',
-  password: '',
-  token: settings.token,
+export const getApiTarget = (settings: AppSettings = settingsStore.get()): ApiTarget => ({
+  baseUrl: (settings.apiUrl || '').trim().replace(/\/+$/, ''),
+  siteId: (settings.siteId || '').trim(),
+  token: (settings.token || '').trim(),
+  version: settings.apiVersion || 'v3',
 });
+
+export const useApiTarget = (): ApiTarget => getApiTarget(settingsStore.use());
+
+// Returns what is missing before a call can be made, or null when everything is set.
+export const missingTargetFields = (target: ApiTarget): string | null => {
+  const missing = [
+    !/^https:\/\/[^/\s]+/i.test(target.baseUrl) && 'API URL (https://…)',
+    !hasRealValue(target.siteId) && 'site ID',
+    !hasRealValue(target.token) && 'token',
+  ].filter(Boolean);
+  return missing.length ? missing.join(', ') : null;
+};
+
+export const isProductionTarget = (target: ApiTarget) => !/\.qualif\./i.test(target.baseUrl);
+
+export const buildUrl = (target: Pick<ApiTarget, 'baseUrl' | 'version'>, path: string, version?: OnestockApiVersion): string => {
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  // The API URL may already carry the version segment.
+  if (/\/v\d+$/.test(target.baseUrl)) return `${target.baseUrl}${cleanPath}`;
+  return `${target.baseUrl}/${version || target.version}${cleanPath}`;
+};
 
 export const proxyFetch = async (
   url: string,
@@ -113,32 +106,6 @@ export const describeError = (envelope: ProxyResponseEnvelope): string => {
   return `HTTP ${envelope.status} ${envelope.statusText || ''}${detail ? ` – ${detail}` : ''}`.trim();
 };
 
-// POST /login → stores the token on the connection instance.
-export const loginConnection = async (conn: ConnectionInstance): Promise<string> => {
-  const url = buildUrl(conn, '/login');
-  try {
-    const envelope = await proxyFetch(url, 'POST', {
-      site_id: conn.siteId,
-      user_id: conn.userId,
-      password: conn.password,
-    });
-    const token = (envelope.body as any)?.token;
-    if (!envelope.ok || !token) throw new Error(describeError(envelope));
-    updateConnection(conn.id, { token, tokenObtainedAt: new Date().toISOString(), lastError: undefined });
-    return token;
-  } catch (err: any) {
-    updateConnection(conn.id, { lastError: err?.message || String(err) });
-    throw err;
-  }
-};
-
-// Payloads carry these variables (Postman style); the real values of the connection
-// are only substituted at call time, so shown, saved or downloaded payloads never hold a token.
-export const SITE_ID_VAR = '{{site_id}}';
-export const TOKEN_VAR = '{{token}}';
-
-const isPlaceholder = (value: string) => /^\{\{\s*[\w.-]+\s*\}\}$/.test(value.trim());
-
 // Replaces every "{{name}}" occurrence in string values (and keys) of a payload.
 export const resolveVariables = <T,>(value: T, variables: Record<string, string | undefined>): T => {
   const replace = (text: string) =>
@@ -154,20 +121,14 @@ export const resolveVariables = <T,>(value: T, variables: Record<string, string 
   return walk(value) as T;
 };
 
-// True when a real value (not a {{variable}} placeholder) is set.
-export const hasRealValue = (value?: string) => !!value && !isPlaceholder(value);
-
 export interface OnestockRequestOptions {
   method: string;
   path: string;
-  // May contain {{site_id}} / {{token}}: they are resolved with the connection values.
+  // May contain {{site_id}} / {{token}}: they are resolved with the API Settings values.
   body?: Record<string, unknown> | null;
-  connection?: ConnectionInstance | null;
   version?: OnestockApiVersion;
   // Adds "site_id": "{{site_id}}" and "token": "{{token}}" to the body when they are missing.
   injectAuth?: boolean;
-  // Re-login once with the instance credentials when the API answers 401.
-  retryOn401?: boolean;
 }
 
 export interface OnestockRequestResult {
@@ -182,29 +143,26 @@ export const onestockRequest = async ({
   method,
   path,
   body,
-  connection,
   version,
   injectAuth = true,
-  retryOn401 = true,
 }: OnestockRequestOptions): Promise<OnestockRequestResult> => {
-  const conn = connection || getActiveConnection();
-  if (!conn) throw new Error('No active OneStock connection. Create and activate one in "Connections".');
+  const target = getApiTarget();
+  const missing = missingTargetFields(target);
+  if (missing) throw new Error(`Missing in API Settings: ${missing}.`);
 
-  let token = conn.token;
-  if (!token && conn.userId && conn.password) token = await loginConnection(conn);
-
-  const url = buildUrl(conn, path, version);
+  const url = buildUrl(target, path, version);
   const requestTemplate = injectAuth
     ? { site_id: SITE_ID_VAR, token: TOKEN_VAR, ...(body || {}) }
     : body || null;
-  const resolve = (t?: string) => resolveVariables(requestTemplate, { site_id: conn.siteId, token: t });
-
-  let envelope = await proxyFetch(url, method, resolve(token));
-
-  if (envelope.status === 401 && retryOn401 && conn.userId && conn.password) {
-    token = await loginConnection(conn);
-    envelope = await proxyFetch(url, method, resolve(token));
-  }
-
+  const envelope = await proxyFetch(url, method, resolveVariables(requestTemplate, { site_id: target.siteId, token: target.token }));
   return { url, method, requestTemplate, envelope };
+};
+
+// Error text for a failed call, with a hint when the token is rejected.
+export const describeCallError = (envelope: ProxyResponseEnvelope): string => {
+  // OneStock answers 401, or 400 with "auth_error", when the token is rejected.
+  const authError = envelope.status === 401 || (envelope.body as any)?.error === 'auth_error';
+  return authError
+    ? `${describeError(envelope)} — the token is expired or invalid: paste a new one in API Settings.`
+    : describeError(envelope);
 };

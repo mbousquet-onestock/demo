@@ -1,7 +1,7 @@
 
 import React, { useState, useRef } from 'react';
 import { ProcessedSite, AppSettings, Product } from '../types';
-import { useActiveConnection, hasRealValue } from '../services/onestockClient';
+import { useApiTarget, missingTargetFields } from '../services/onestockClient';
 import ExportModal from './ExportModal';
 
 interface StepHistoryProps {
@@ -13,9 +13,8 @@ interface StepHistoryProps {
 }
 
 const StepHistory: React.FC<StepHistoryProps> = ({ history, onViewItem, onNewImport, settings, onImportJson }) => {
-  // API export uses the active connection, or real values typed in API Settings.
-  const activeConnection = useActiveConnection();
-  const canExport = !!activeConnection || (hasRealValue(settings.token) && hasRealValue(settings.siteId));
+  // API export needs the URL, site ID and token of API Settings.
+  const canExport = !missingTargetFields(useApiTarget());
   const [exportSite, setExportSite] = useState<ProcessedSite | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 

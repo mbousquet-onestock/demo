@@ -50,7 +50,7 @@ export const generateOrderPayloads = (
   settings: AppSettings,
   aiIdentities?: CustomerIdentity[]
 ) => {
-  // Variables resolved with the active connection when the payload is sent.
+  // Variables resolved with the API Settings values when the payload is sent.
   const siteId = SITE_ID_VAR;
   const token = TOKEN_VAR;
   const now = Math.floor(Date.now() / 1000);

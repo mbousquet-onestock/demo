@@ -2,6 +2,7 @@
 import React, { useState, useRef } from 'react';
 import { AppSettings } from '../types';
 import DatabaseSync from './DatabaseSync';
+import ApiTargetSettings from './ApiTargetSettings';
 
 interface SettingsProps {
   settings: AppSettings;
@@ -179,50 +180,9 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
         className="hidden" 
       />
 
+      <ApiTargetSettings settings={settings} onSave={onSave} />
+
       <DatabaseSync />
-
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
-        <div className="border-b border-gray-100 pb-6 mb-8 flex justify-between items-center">
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900">API Gateway Configuration</h2>
-            <p className="text-gray-500 text-sm mt-1">Connectivity details for the <strong>{settings.apiName}</strong>.</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-          <div className="space-y-6">
-            <h3 className="text-xs font-bold text-[#002D72] uppercase tracking-widest border-l-4 border-[#002D72] pl-3">Connection Identity</h3>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">Custom API Label</label>
-                <input name="apiName" value={settings.apiName} onChange={handleChange} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none font-bold text-gray-800" />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">Base API URL</label>
-                <input name="apiUrl" value={settings.apiUrl} onChange={handleChange} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none" />
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-6">
-            <h3 className="text-xs font-bold text-[#002D72] uppercase tracking-widest border-l-4 border-[#002D72] pl-3">Security & Context</h3>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">Site Context ID</label>
-                <input name="siteId" value={settings.siteId} onChange={handleChange} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none" />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">Import Sales Channel</label>
-                <input name="salesChannel" value={settings.salesChannel} onChange={handleChange} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none" />
-              </div>
-              <div className="col-span-2">
-                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">OAuth 2.0 Bearer Token</label>
-                <input type="password" name="token" value={settings.token} onChange={handleChange} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none" />
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">

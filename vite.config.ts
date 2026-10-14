@@ -42,7 +42,7 @@ const onestockApiDevPlugin = (): Plugin => ({
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     // Server-side variables used by the local /api middleware (read from .env.local).
-    for (const key of ['PROXY_ALLOWED_HOSTS', 'DATABASE_URL', 'POSTGRES_URL', 'APP_ACCESS_KEY', 'NEON_FETCH_ENDPOINT']) {
+    for (const key of ['PROXY_ALLOWED_HOSTS', 'DATABASE_URL', 'POSTGRES_URL', 'APP_ACCESS_KEY', 'TOKEN_ENCRYPTION_KEY', 'NEON_FETCH_ENDPOINT']) {
       if (env[key]) process.env[key] = env[key];
     }
     return {

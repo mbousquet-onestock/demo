@@ -27,9 +27,9 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
 `npm run dev` / `npm run preview` serve the same proxy locally.
 
 - Only `*.onestock-retail.com` targets are allowed. Override with the `PROXY_ALLOWED_HOSTS` env var (comma-separated host suffixes).
-- **Connections**: define instances (environment, version, site ID, user / password), get a token with `POST /login`
-  and pick the active one. Its token and site ID are injected in every API call and payload of the app
-  (automatic re-login on 401).
+- **API Settings**: API URL (qualif / prod shortcuts), version, site ID and token (paste the token returned by
+  `POST /login`). Every call uses them; payloads keep `{{site_id}}` / `{{token}}` variables, resolved at call time.
+  "Test token" calls `GET /sales_channels`.
 - **API Explorer**: all GET routes of the OneStock spec (`data/onestockGetEndpoints.json`, generated from the
   OpenAPI file). Requests / results are saved with a required name and an optional project, and listed by project.
   `GET /items` results can be opened in the Product Manager.
@@ -37,7 +37,7 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
 
 ## Database (Vercel Postgres / Neon)
 
-Import history, settings, connection instances (credentials and tokens included) and saved payloads are stored in
+Import history, settings (token included) and saved payloads are stored in
 Postgres through the `api/data.ts` function (one `app_documents` table, created automatically). Each browser keeps a
 localStorage copy as cache; the first sync of a browser uploads its local data, afterwards the database wins.
 
@@ -45,6 +45,9 @@ localStorage copy as cache; the first sync of a browser uploads its local data, 
    (this adds `DATABASE_URL`).
 2. Add an `APP_ACCESS_KEY` environment variable (a long random secret) and redeploy. The data API refuses every call
    without it.
+   Tokens / passwords are encrypted (AES-256-GCM) by the data API before reaching the database, with a key derived
+   from `TOKEN_ENCRYPTION_KEY`, or from `APP_ACCESS_KEY` when it is not set. Changing that key makes stored tokens
+   unreadable: paste the token again in API Settings.
 3. In the app, **API Settings → Database**: enter the same key once per browser.
 
 Local development: put `DATABASE_URL` and `APP_ACCESS_KEY` in `.env.local`. To use a local Postgres instead of Neon,

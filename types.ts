@@ -43,7 +43,6 @@ export enum AppStep {
   STOCK_UPDATE = 'STOCK_UPDATE',
   JSON_VIEWER = 'JSON_VIEWER',
   ORDER_GENERATION = 'ORDER_GENERATION',
-  CONNECTIONS = 'CONNECTIONS',
   API_EXPLORER = 'API_EXPLORER',
   API_LOG = 'API_LOG'
 }
@@ -121,8 +120,11 @@ export interface Endpoint {
 
 export interface AppSettings {
   apiName: string;
+  // Base URL of the OneStock API, e.g. https://c500.api.qualif.onestock-retail.com
   apiUrl: string;
+  apiVersion?: OnestockApiVersion;
   siteId: string;
+  // Token used by every call (stored encrypted in the database).
   token: string;
   salesChannel: string;
   stockEndpoints: string[];
@@ -138,9 +140,10 @@ export interface AppSettings {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   apiName: 'OneStock Item Import API',
-  apiUrl: 'https://api.onestock-retail.com',
-  siteId: '{{site_id}}',
-  token: '{{token}}',
+  apiUrl: '',
+  apiVersion: 'v3',
+  siteId: '',
+  token: '',
   salesChannel: 'sc_ois_1',
   stockEndpoints: ['Store_1', 'Store_2', 'Warehouse_Main'],
   endpoints: [],
@@ -158,22 +161,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultLength: 20
 };
 
-export type OnestockEnvironment = 'qualif' | 'prod' | 'custom';
 export type OnestockApiVersion = 'v1' | 'v2' | 'v3' | 'v4';
-
-export interface ConnectionInstance {
-  id: string;
-  name: string;
-  environment: OnestockEnvironment;
-  customBaseUrl?: string;
-  version: OnestockApiVersion;
-  siteId: string;
-  userId: string;
-  password: string;
-  token?: string;
-  tokenObtainedAt?: string;
-  lastError?: string;
-}
 
 export interface SavedPayload {
   id: string;

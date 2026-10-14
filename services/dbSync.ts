@@ -3,7 +3,7 @@
 import type { DataCollection, DataDocument } from '../api/_dataCore';
 import { createStore, Store } from './persistedStore';
 import { historyStore, settingsStore } from './appStores';
-import { connectionsStore, activeConnectionIdStore } from './onestockClient';
+import { hasRealValue } from './onestockClient';
 import { savedPayloadsStore } from './payloadStore';
 
 export const DATA_ENDPOINT = '/api/data';
@@ -34,10 +34,8 @@ const byDesc = (key: string) => (a: any, b: any) => String(b[key] ?? '').localeC
 
 const BINDINGS: Binding[] = [
   { collection: 'history', store: historyStore, kind: 'list', sort: byDesc('id') },
-  { collection: 'connections', store: connectionsStore, kind: 'list', sort: (a, b) => String(a.id).localeCompare(String(b.id)) },
   { collection: 'saved_payloads', store: savedPayloadsStore, kind: 'list', sort: byDesc('createdAt') },
   { collection: 'settings', store: settingsStore, kind: 'value', docId: 'app_settings' },
-  { collection: 'app_state', store: activeConnectionIdStore, kind: 'value', docId: 'active_connection' },
 ];
 
 // Last JSON sent to / read from the database, per collection and document id.
@@ -161,6 +159,51 @@ export const syncNow = async () => {
   for (const b of BINDINGS) await flush(b);
 };
 
+// --- Legacy "Connections" screen (removed) --------------------------------------------
+// Its active instance fills API Settings once (when no token is set there), then the stored
+// instances, which held passwords, are deleted from this browser and from the database.
+const LEGACY_COLLECTIONS: DataCollection[] = ['connections', 'app_state'];
+const LEGACY_LOCAL_KEYS = ['onestock_connections', 'onestock_active_connection'];
+
+const legacyBaseUrl = (c: any): string => {
+  if (c.customBaseUrl?.trim()) return c.customBaseUrl.trim().replace(/\/+$/, '');
+  if (c.environment === 'custom') return '';
+  return `https://${c.siteId}.api${c.environment === 'qualif' ? '.qualif' : ''}.onestock-retail.com`;
+};
+
+const applyLegacyConnection = (connections: any[], activeId: unknown) => {
+  const active = connections.find(c => c && c.id === activeId) || connections.find(c => c?.token);
+  if (!active?.token || hasRealValue(settingsStore.get().token)) return;
+  settingsStore.set(prev => ({
+    ...prev,
+    apiUrl: legacyBaseUrl(active) || prev.apiUrl,
+    apiVersion: active.version || prev.apiVersion,
+    siteId: active.siteId || prev.siteId,
+    token: active.token,
+  }));
+};
+
+export const migrateLegacyLocalConnections = () => {
+  try {
+    const connections = JSON.parse(localStorage.getItem('onestock_connections') || '[]');
+    const activeId = JSON.parse(localStorage.getItem('onestock_active_connection') || 'null');
+    if (Array.isArray(connections) && connections.length > 0) applyLegacyConnection(connections, activeId);
+    LEGACY_LOCAL_KEYS.forEach(k => localStorage.removeItem(k));
+  } catch (e) {
+    console.warn('Legacy connections migration skipped', e);
+  }
+};
+
+const migrateLegacyDbConnections = async () => {
+  const [connections, appState] = await Promise.all(LEGACY_COLLECTIONS.map(pullCollection));
+  if (connections.length === 0 && appState.length === 0) return;
+  const activeId = (appState.find(d => d.id === 'active_connection')?.data as any)?.value;
+  applyLegacyConnection(connections.map(d => d.data), activeId);
+  for (const [collection, docs] of [['connections', connections], ['app_state', appState]] as const) {
+    if (docs.length > 0) await api({ method: 'POST', body: JSON.stringify({ collection, deletes: docs.map(d => d.id) }) });
+  }
+};
+
 let initRun: Promise<void> | null = null;
 
 // Loads every collection from the database. The first sync of a browser merges its local data
@@ -205,6 +248,7 @@ export const initDbSync = (force = false): Promise<void> => {
         subscribed = true;
       }
       ready = true;
+      await migrateLegacyDbConnections().catch(err => console.warn('Legacy connections cleanup failed', err));
       if (dbStatusStore.get().state !== 'error') {
         dbStatusStore.set({ state: 'synced', lastSyncAt: new Date().toISOString() });
       }

@@ -3,7 +3,8 @@ import { OnestockApiVersion, OnestockGetEndpoint, SavedPayload } from '../types'
 import endpointsCatalog from '../data/onestockGetEndpoints.json';
 import {
   onestockRequest,
-  useActiveConnection,
+  useApiTarget,
+  missingTargetFields,
   SITE_ID_VAR,
   TOKEN_VAR,
   ProxyResponseEnvelope,
@@ -17,7 +18,7 @@ import { extractOnestockItems } from '../utils/payloadUtils';
 const ENDPOINTS = endpointsCatalog as OnestockGetEndpoint[];
 const TAGS = Array.from(new Set(ENDPOINTS.map(e => e.tag))).sort();
 
-// Puts the {{site_id}} / {{token}} variables first; their values come from the active connection at call time.
+// Puts the {{site_id}} / {{token}} variables first; their values come from API Settings at call time.
 const withAuthVariables = (body: Record<string, unknown>) => {
   const { site_id, token, ...rest } = body;
   return {
@@ -47,7 +48,8 @@ interface StepApiExplorerProps {
 const NO_PROJECT_FILTER = '__none__';
 
 const StepApiExplorer: React.FC<StepApiExplorerProps> = ({ onOpenItems }) => {
-  const connection = useActiveConnection();
+  const target = useApiTarget();
+  const targetMissing = missingTargetFields(target);
   const savedPayloads = savedPayloadsStore.use();
 
   const [tab, setTab] = useState<'explorer' | 'saved'>('explorer');
@@ -86,7 +88,7 @@ const StepApiExplorer: React.FC<StepApiExplorerProps> = ({ onOpenItems }) => {
 
   const selectEndpoint = (endpoint: OnestockGetEndpoint, body?: string, params?: Record<string, string>) => {
     setSelected(endpoint);
-    setVersion(pickVersion(endpoint, connection?.version));
+    setVersion(pickVersion(endpoint, target.version));
     setPathParams(params || Object.fromEntries(endpoint.pathParams.map(p => [p, ''])));
     setBodyText(body ?? defaultBodyFor(endpoint));
     setBodyError(null);
@@ -149,7 +151,7 @@ const StepApiExplorer: React.FC<StepApiExplorerProps> = ({ onOpenItems }) => {
       method: 'GET',
       path,
       url: fromLastCall ? lastCall.url : undefined,
-      connectionName: connection?.name,
+      connectionName: target.siteId || undefined,
       request: what === 'response' ? undefined : fromLastCall ? lastCall.request : (body || {}),
       response: what === 'request' ? undefined : lastCall?.envelope.body,
       status: what === 'request' ? undefined : lastCall?.envelope.status,
@@ -234,8 +236,8 @@ const StepApiExplorer: React.FC<StepApiExplorerProps> = ({ onOpenItems }) => {
         <div>
           <h2 className="text-2xl font-bold text-gray-900">OneStock GET Explorer</h2>
           <p className="text-gray-500 text-sm mt-1">
-            {ENDPOINTS.length} GET routes from the OneStock API spec. Calls go through the Vercel proxy with the active connection
-            {connection ? <> (<strong>{connection.name}</strong> · {connection.siteId})</> : <span className="text-red-600 font-semibold"> — no active connection</span>}.
+            {ENDPOINTS.length} GET routes from the OneStock API spec. Calls go through the Vercel proxy with the API Settings target
+            {targetMissing ? <span className="text-red-600 font-semibold"> — missing in API Settings: {targetMissing}</span> : <> (<strong>{target.siteId}</strong> · {target.baseUrl})</>}.
           </p>
         </div>
         <div className="flex bg-gray-100 p-1 rounded-lg text-xs font-bold shrink-0">
@@ -326,7 +328,7 @@ const StepApiExplorer: React.FC<StepApiExplorerProps> = ({ onOpenItems }) => {
 
                   <div>
                     <div className="flex items-center justify-between mb-1">
-                      <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">{'Request body — {{site_id}} and {{token}} are replaced by the active connection values at call time'}</label>
+                      <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">{'Request body — {{site_id}} and {{token}} are replaced by the API Settings values at call time'}</label>
                       <button onClick={() => setBodyText(defaultBodyFor(selected))} className="text-[10px] font-bold text-onestock-blue hover:underline">Reset to example</button>
                     </div>
                     <textarea
@@ -344,7 +346,7 @@ const StepApiExplorer: React.FC<StepApiExplorerProps> = ({ onOpenItems }) => {
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       onClick={handleSend}
-                      disabled={loading || !connection}
+                      disabled={loading || !!targetMissing}
                       className="px-6 py-2 text-sm font-bold text-white bg-onestock-blue rounded-lg hover:bg-[#001F4D] disabled:opacity-40"
                     >
                       {loading ? 'Calling…' : 'Send'}

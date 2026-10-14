@@ -1,6 +1,6 @@
 
 import { Product, AppSettings } from '../types';
-import { onestockRequest, getActiveConnection, connectionFromSettings, describeError } from './onestockClient';
+import { onestockRequest, getApiTarget, describeCallError } from './onestockClient';
 
 export const exportToOnestockApi = async (
   products: Product[],
@@ -8,12 +8,12 @@ export const exportToOnestockApi = async (
   onProgress: (msg: string) => void
 ): Promise<void> => {
   const { salesChannel } = settings;
-  // Uses the active connection instance (token from /login), else the values typed in API Settings.
-  // Every call goes through the Vercel proxy and gets site_id / token injected in its body.
-  const connection = getActiveConnection() || connectionFromSettings(settings);
+  // Uses the URL / site / token of API Settings; every call goes through the Vercel proxy
+  // with {{site_id}} / {{token}} resolved in its body.
+  const target = getApiTarget(settings);
   const call = async (method: string, path: string, body: Record<string, unknown>) => {
-    const { envelope } = await onestockRequest({ method, path, body, connection });
-    if (!envelope.ok) throw new Error(describeError(envelope));
+    const { envelope } = await onestockRequest({ method, path, body });
+    if (!envelope.ok) throw new Error(describeCallError(envelope));
     return envelope.body as any;
   };
 
@@ -37,7 +37,7 @@ export const exportToOnestockApi = async (
     return val !== undefined ? String(val) : undefined;
   };
 
-  onProgress(`Connecting to: ${connection.name}`);
+  onProgress(`Connecting to: ${target.baseUrl} (site ${target.siteId})`);
   onProgress('Initializing import session...');
   let importId: string;
   try {
@@ -111,21 +111,20 @@ export const exportToOnestockApi = async (
   onProgress('Import completed successfully!');
 };
 
-// Synchronous stock import (PATCH /stock_import), through the proxy with the active connection.
+// Synchronous stock import (PATCH /stock_import), through the proxy with the API Settings target.
 export const exportStockToOnestockApi = async (
   stocks: { item_id: string; endpoint_id: string; quantity: number }[],
   settings: AppSettings,
   onProgress: (msg: string) => void
 ): Promise<void> => {
-  const connection = getActiveConnection() || connectionFromSettings(settings);
-  onProgress(`Connecting to: ${connection.name}`);
+  const target = getApiTarget(settings);
+  onProgress(`Connecting to: ${target.baseUrl} (site ${target.siteId})`);
   onProgress(`Sending ${stocks.length} stock line(s) to PATCH /stock_import...`);
   const { envelope } = await onestockRequest({
     method: 'PATCH',
     path: '/stock_import',
     body: { import: { incremental: false }, stocks },
-    connection,
   });
-  if (!envelope.ok) throw new Error(describeError(envelope));
+  if (!envelope.ok) throw new Error(describeCallError(envelope));
   onProgress('Stock import completed successfully!');
 };

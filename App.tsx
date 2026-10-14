@@ -13,12 +13,10 @@ import Settings from './components/Settings';
 import StepStockUpdate from './components/StepStockUpdate';
 import StepJsonViewer from './components/StepJsonViewer';
 import StepOrderGeneration from './components/StepOrderGeneration';
-import StepConnections from './components/StepConnections';
 import StepApiExplorer from './components/StepApiExplorer';
 import StepApiLog from './components/StepApiLog';
-import { connectionsStore, getBaseUrl, SITE_ID_VAR, TOKEN_VAR } from './services/onestockClient';
 import { historyStore, settingsStore } from './services/appStores';
-import { initDbSync } from './services/dbSync';
+import { initDbSync, migrateLegacyLocalConnections } from './services/dbSync';
 import { onestockItemsToProducts } from './utils/payloadUtils';
 
 const App: React.FC = () => {
@@ -37,18 +35,10 @@ const App: React.FC = () => {
   const settings = settingsStore.use();
   const setSettings = settingsStore.set;
 
-  useEffect(() => { initDbSync(); }, []);
-
-  // Payloads keep the {{site_id}} / {{token}} variables: the real values of the active connection
-  // are only substituted when a call is sent (see onestockRequest).
-  // Earlier versions copied the connection's site / token into the settings; switch them back to the variables.
-  const connections = connectionsStore.use();
   useEffect(() => {
-    const copiedFromConnection = connections.some(c => getBaseUrl(c) === settings.apiUrl);
-    if (copiedFromConnection && (settings.siteId !== SITE_ID_VAR || settings.token !== TOKEN_VAR)) {
-      setSettings(prev => ({ ...prev, siteId: SITE_ID_VAR, token: TOKEN_VAR }));
-    }
-  }, [connections, settings.apiUrl, settings.siteId, settings.token]);
+    migrateLegacyLocalConnections();
+    initDbSync();
+  }, []);
 
   const handleStartScan = (url: string, limit: number) => {
     setTargetUrl(url);
@@ -191,8 +181,6 @@ const App: React.FC = () => {
         
         <main className="flex-1 overflow-y-auto p-6 lg:p-10">
           <div className="max-w-6xl mx-auto h-full">
-            {currentStep === AppStep.CONNECTIONS && <StepConnections />}
-
             {currentStep === AppStep.API_EXPLORER && <StepApiExplorer onOpenItems={(items, label) => handleOpenItems(items, label)} />}
 
             {currentStep === AppStep.API_LOG && <StepApiLog />}
