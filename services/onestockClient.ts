@@ -25,10 +25,17 @@ export const updateConnection = (id: string, patch: Partial<ConnectionInstance>)
   connectionsStore.set(prev => prev.map(c => (c.id === id ? { ...c, ...patch } : c)));
 };
 
-export const getBaseUrl = (conn: Pick<ConnectionInstance, 'environment' | 'customBaseUrl' | 'siteId'>): string => {
-  if (conn.environment === 'custom') return (conn.customBaseUrl || '').replace(/\/+$/, '');
+// URL deduced from the environment and the site ID (used when no API URL is typed).
+export const getDefaultBaseUrl = (conn: Pick<ConnectionInstance, 'environment' | 'siteId'>): string => {
+  if (conn.environment === 'custom') return '';
   const env = conn.environment === 'qualif' ? '.qualif' : '';
-  return `https://${conn.siteId}.api${env}.onestock-retail.com`;
+  return `https://${conn.siteId || '{site_id}'}.api${env}.onestock-retail.com`;
+};
+
+// A typed API URL always wins over the environment default.
+export const getBaseUrl = (conn: Pick<ConnectionInstance, 'environment' | 'customBaseUrl' | 'siteId'>): string => {
+  const typed = (conn.customBaseUrl || '').trim().replace(/\/+$/, '');
+  return typed || getDefaultBaseUrl(conn);
 };
 
 export const buildUrl = (

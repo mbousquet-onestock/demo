@@ -5,6 +5,7 @@ import {
   activeConnectionIdStore,
   loginConnection,
   buildUrl,
+  getDefaultBaseUrl,
 } from '../services/onestockClient';
 
 const emptyConnection = (): ConnectionInstance => ({
@@ -30,8 +31,10 @@ const StepConnections: React.FC = () => {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'ok' | 'error'; text: string } | null>(null);
 
-  const setField = <K extends keyof ConnectionInstance>(key: K, value: ConnectionInstance[K]) =>
+  const setField = <K extends keyof ConnectionInstance>(key: K, value: ConnectionInstance[K]) => {
     setDraft(prev => (prev ? { ...prev, [key]: value } : prev));
+    setMessage(prev => (prev?.type === 'error' ? null : prev));
+  };
 
   const handleSave = () => {
     if (!draft) return;
@@ -39,8 +42,13 @@ const StepConnections: React.FC = () => {
       setMessage({ type: 'error', text: 'Name and Site ID are required.' });
       return;
     }
-    if (draft.environment === 'custom' && !draft.customBaseUrl?.trim()) {
-      setMessage({ type: 'error', text: 'A custom base URL is required for the "custom" environment.' });
+    const typedUrl = draft.customBaseUrl?.trim() || '';
+    if (draft.environment === 'custom' && !typedUrl) {
+      setMessage({ type: 'error', text: 'An API URL is required for the "custom" environment.' });
+      return;
+    }
+    if (typedUrl && !/^https:\/\/[^/\s]+/i.test(typedUrl)) {
+      setMessage({ type: 'error', text: 'The API URL must start with https://' });
       return;
     }
     if (draft.id) {
@@ -134,12 +142,25 @@ const StepConnections: React.FC = () => {
                 {(['v1', 'v2', 'v3', 'v4'] as OnestockApiVersion[]).map(v => <option key={v} value={v}>{v}</option>)}
               </select>
             </div>
-            {draft.environment === 'custom' && (
-              <div className="md:col-span-3">
-                <label className={labelClass}>Custom base URL</label>
-                <input className={inputClass} value={draft.customBaseUrl} onChange={e => setField('customBaseUrl', e.target.value)} placeholder="https://c500.api.qualif.onestock-retail.com" />
+            <div className="md:col-span-3">
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">API URL (base of every call)</label>
+                {draft.customBaseUrl && draft.environment !== 'custom' && (
+                  <button onClick={() => setField('customBaseUrl', '')} className="text-[10px] font-bold text-onestock-blue hover:underline">
+                    Reset to {draft.environment} default
+                  </button>
+                )}
               </div>
-            )}
+              <input
+                className={inputClass + ' font-mono'}
+                value={draft.customBaseUrl || ''}
+                onChange={e => setField('customBaseUrl', e.target.value)}
+                placeholder={getDefaultBaseUrl(draft) || 'https://c500.api.qualif.onestock-retail.com'}
+              />
+              <p className="text-[10px] text-gray-400 mt-1">
+                Leave empty to use the {draft.environment === 'custom' ? 'typed' : `${draft.environment}`} default. The version (/{draft.version}) is appended unless the URL already ends with /v1…/v4.
+              </p>
+            </div>
             <div>
               <label className={labelClass}>Site ID</label>
               <input className={inputClass} value={draft.siteId} onChange={e => setField('siteId', e.target.value.trim())} placeholder="c500" />
@@ -154,8 +175,8 @@ const StepConnections: React.FC = () => {
             </div>
           </div>
           <p className="text-[11px] text-gray-400">
-            Login URL: <span className="font-mono">{draft.siteId || draft.environment === 'custom' ? buildUrl(draft, '/login') : '—'}</span>.
-            Credentials are kept in this browser's local storage only.
+            Login URL: <span className="font-mono">{draft.siteId || draft.customBaseUrl?.trim() ? buildUrl(draft, '/login') : '—'}</span>.
+            Credentials are kept in this browser and, when configured, in the app database.
           </p>
           <div className="flex gap-3 justify-end">
             <button onClick={() => setDraft(null)} className="px-4 py-2 text-xs font-bold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
