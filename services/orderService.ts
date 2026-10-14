@@ -1,3 +1,4 @@
+import { SITE_ID_VAR, TOKEN_VAR } from './onestockClient';
 
 import { Product, AppSettings } from '../types';
 import { CustomerIdentity } from './geminiService';
@@ -49,7 +50,9 @@ export const generateOrderPayloads = (
   settings: AppSettings,
   aiIdentities?: CustomerIdentity[]
 ) => {
-  const { siteId, token } = settings;
+  // Variables resolved with the active connection when the payload is sent.
+  const siteId = SITE_ID_VAR;
+  const token = TOKEN_VAR;
   const now = Math.floor(Date.now() / 1000);
   const oneDay = 86400;
   

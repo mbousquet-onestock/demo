@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Product, AppSettings, SavedPayload } from '../types';
 import { buildItemsPayload, regenerateProductIds, RegenerateIdsOptions, extractOnestockItems } from '../utils/payloadUtils';
-import { onestockRequest, useActiveConnection, redactToken, describeError, ProxyResponseEnvelope } from '../services/onestockClient';
+import { onestockRequest, useActiveConnection, describeError, ProxyResponseEnvelope, SITE_ID_VAR, TOKEN_VAR } from '../services/onestockClient';
 import { savePayload, downloadJson, savedPayloadsStore, listProjects, getLastProject, setLastProject } from '../services/payloadStore';
 
 const labelClass = 'block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5';
@@ -132,11 +132,12 @@ export const ItemsPushDrawer: React.FC<ItemsPushDrawerProps> = ({ products, sett
   const [notice, setNotice] = useState<string | null>(null);
 
   const payload = useMemo(() => ({
-    site_id: connection?.siteId || settings.siteId,
+    site_id: SITE_ID_VAR,
+    token: TOKEN_VAR,
     aggregate,
     only_if_exists: onlyIfExists,
     ...buildItemsPayload(products, settings),
-  }), [products, settings, connection, aggregate, onlyIfExists]);
+  }), [products, settings, aggregate, onlyIfExists]);
 
   const handleSavePayload = (withResult: boolean) => {
     if (!name.trim()) {
@@ -167,9 +168,8 @@ export const ItemsPushDrawer: React.FC<ItemsPushDrawerProps> = ({ products, sett
     setError(null);
     setNotice(null);
     try {
-      const { site_id, ...body } = payload;
-      const res = await onestockRequest({ method, path: '/items', body });
-      setResult({ url: res.url, request: redactToken(res.requestBody), envelope: res.envelope });
+      const res = await onestockRequest({ method, path: '/items', body: payload });
+      setResult({ url: res.url, request: res.requestTemplate, envelope: res.envelope });
       if (!res.envelope.ok) setError(describeError(res.envelope));
     } catch (err: any) {
       setError(err?.message || String(err));
@@ -201,7 +201,7 @@ export const ItemsPushDrawer: React.FC<ItemsPushDrawerProps> = ({ products, sett
         </div>
 
         <div>
-          <label className={labelClass}>Payload (token added at send time)</label>
+          <label className={labelClass}>{'Payload — {{site_id}} / {{token}} replaced by the active connection values at send time'}</label>
           <pre className="max-h-[35vh] overflow-auto bg-[#001F4D] text-blue-100 font-mono text-[11px] p-4 rounded-lg whitespace-pre-wrap break-all">
             {JSON.stringify(payload, null, 2)}
           </pre>

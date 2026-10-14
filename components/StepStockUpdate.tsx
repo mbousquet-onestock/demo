@@ -1,5 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
+import { SITE_ID_VAR, TOKEN_VAR } from '../services/onestockClient';
 import { Product, AppSettings } from '../types';
 
 interface StepStockUpdateProps {
@@ -102,8 +103,8 @@ const StepStockUpdate: React.FC<StepStockUpdateProps> = ({ products, settings, o
   const generatePayload = () => {
     const formattedStocks = getStockDataArray();
     const payload = {
-      token: settings.token,
-      site_id: settings.siteId,
+      token: TOKEN_VAR,
+      site_id: SITE_ID_VAR,
       import: {
         incremental: false
       },

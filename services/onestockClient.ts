@@ -132,13 +132,39 @@ export const loginConnection = async (conn: ConnectionInstance): Promise<string>
   }
 };
 
+// Payloads carry these variables (Postman style); the real values of the connection
+// are only substituted at call time, so shown, saved or downloaded payloads never hold a token.
+export const SITE_ID_VAR = '{{site_id}}';
+export const TOKEN_VAR = '{{token}}';
+
+const isPlaceholder = (value: string) => /^\{\{\s*[\w.-]+\s*\}\}$/.test(value.trim());
+
+// Replaces every "{{name}}" occurrence in string values (and keys) of a payload.
+export const resolveVariables = <T,>(value: T, variables: Record<string, string | undefined>): T => {
+  const replace = (text: string) =>
+    text.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (match, name) => variables[name] ?? match);
+  const walk = (v: unknown): unknown => {
+    if (typeof v === 'string') return replace(v);
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === 'object') {
+      return Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, val]) => [replace(k), walk(val)]));
+    }
+    return v;
+  };
+  return walk(value) as T;
+};
+
+// True when a real value (not a {{variable}} placeholder) is set.
+export const hasRealValue = (value?: string) => !!value && !isPlaceholder(value);
+
 export interface OnestockRequestOptions {
   method: string;
   path: string;
+  // May contain {{site_id}} / {{token}}: they are resolved with the connection values.
   body?: Record<string, unknown> | null;
   connection?: ConnectionInstance | null;
   version?: OnestockApiVersion;
-  // Adds site_id / token to the body (OneStock token authentication).
+  // Adds "site_id": "{{site_id}}" and "token": "{{token}}" to the body when they are missing.
   injectAuth?: boolean;
   // Re-login once with the instance credentials when the API answers 401.
   retryOn401?: boolean;
@@ -147,7 +173,8 @@ export interface OnestockRequestOptions {
 export interface OnestockRequestResult {
   url: string;
   method: string;
-  requestBody: Record<string, unknown> | null;
+  // Payload with the variables, as shown / saved by the app.
+  requestTemplate: Record<string, unknown> | null;
   envelope: ProxyResponseEnvelope;
 }
 
@@ -167,25 +194,17 @@ export const onestockRequest = async ({
   if (!token && conn.userId && conn.password) token = await loginConnection(conn);
 
   const url = buildUrl(conn, path, version);
-  const buildBody = (t?: string) =>
-    injectAuth ? { ...(body || {}), site_id: conn.siteId, token: t } : body || null;
+  const requestTemplate = injectAuth
+    ? { site_id: SITE_ID_VAR, token: TOKEN_VAR, ...(body || {}) }
+    : body || null;
+  const resolve = (t?: string) => resolveVariables(requestTemplate, { site_id: conn.siteId, token: t });
 
-  let requestBody = buildBody(token);
-  let envelope = await proxyFetch(url, method, requestBody);
+  let envelope = await proxyFetch(url, method, resolve(token));
 
   if (envelope.status === 401 && retryOn401 && conn.userId && conn.password) {
     token = await loginConnection(conn);
-    requestBody = buildBody(token);
-    envelope = await proxyFetch(url, method, requestBody);
+    envelope = await proxyFetch(url, method, resolve(token));
   }
 
-  return { url, method, requestBody, envelope };
-};
-
-// Strips the token before a request payload is shown or saved.
-export const redactToken = <T,>(payload: T): T => {
-  if (payload && typeof payload === 'object' && !Array.isArray(payload) && 'token' in (payload as any)) {
-    return { ...(payload as any), token: '***' };
-  }
-  return payload;
+  return { url, method, requestTemplate, envelope };
 };

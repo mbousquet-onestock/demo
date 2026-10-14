@@ -4,7 +4,8 @@ import endpointsCatalog from '../data/onestockGetEndpoints.json';
 import {
   onestockRequest,
   useActiveConnection,
-  redactToken,
+  SITE_ID_VAR,
+  TOKEN_VAR,
   ProxyResponseEnvelope,
 } from '../services/onestockClient';
 import {
@@ -16,12 +17,18 @@ import { extractOnestockItems } from '../utils/payloadUtils';
 const ENDPOINTS = endpointsCatalog as OnestockGetEndpoint[];
 const TAGS = Array.from(new Set(ENDPOINTS.map(e => e.tag))).sort();
 
-const defaultBodyFor = (endpoint: OnestockGetEndpoint): string => {
-  const body = { ...(endpoint.exampleBody || {}) };
-  delete (body as any).site_id; // injected from the active connection
-  delete (body as any).token;
-  return JSON.stringify(body, null, 2);
+// Puts the {{site_id}} / {{token}} variables first; their values come from the active connection at call time.
+const withAuthVariables = (body: Record<string, unknown>) => {
+  const { site_id, token, ...rest } = body;
+  return {
+    site_id: typeof site_id === 'string' && site_id.startsWith('{{') ? site_id : SITE_ID_VAR,
+    token: TOKEN_VAR,
+    ...rest,
+  };
 };
+
+const defaultBodyFor = (endpoint: OnestockGetEndpoint): string =>
+  JSON.stringify(withAuthVariables({ ...(endpoint.exampleBody || {}) }), null, 2);
 
 const pickVersion = (endpoint: OnestockGetEndpoint, preferred?: OnestockApiVersion): OnestockApiVersion | undefined => {
   if (endpoint.versions.length === 0) return preferred;
@@ -116,7 +123,7 @@ const StepApiExplorer: React.FC<StepApiExplorerProps> = ({ onOpenItems }) => {
     const path = fillPath(selected.path, pathParams);
     try {
       const result = await onestockRequest({ method: 'GET', path, body, version });
-      setLastCall({ url: result.url, path, request: redactToken(result.requestBody), envelope: result.envelope });
+      setLastCall({ url: result.url, path, request: result.requestTemplate, envelope: result.envelope });
     } catch (err: any) {
       setCallError(err?.message || String(err));
     } finally {
@@ -143,7 +150,7 @@ const StepApiExplorer: React.FC<StepApiExplorerProps> = ({ onOpenItems }) => {
       path,
       url: fromLastCall ? lastCall.url : undefined,
       connectionName: connection?.name,
-      request: what === 'response' ? undefined : fromLastCall ? lastCall.request : { ...(body || {}), site_id: connection?.siteId },
+      request: what === 'response' ? undefined : fromLastCall ? lastCall.request : (body || {}),
       response: what === 'request' ? undefined : lastCall?.envelope.body,
       status: what === 'request' ? undefined : lastCall?.envelope.status,
       durationMs: what === 'request' ? undefined : lastCall?.envelope.durationMs,
@@ -167,9 +174,8 @@ const StepApiExplorer: React.FC<StepApiExplorerProps> = ({ onOpenItems }) => {
     const re = new RegExp(`^${endpoint.path.replace(/\{[^}]+\}/g, '([^/]+)')}$`);
     const match = entry.path.match(re);
     names.forEach((n, i) => { params[n] = match?.[i + 1] ? decodeURIComponent(match[i + 1]) : ''; });
-    const request = { ...((entry.request as any) || {}) };
-    delete request.site_id;
-    delete request.token;
+    // Older saves hold the real site / a masked token: switch them back to the variables.
+    const request = withAuthVariables({ ...((entry.request as any) || {}) });
     if (endpoint.internal) setShowInternal(true);
     selectEndpoint(endpoint, JSON.stringify(request, null, 2), params);
     setTab('explorer');
@@ -320,7 +326,7 @@ const StepApiExplorer: React.FC<StepApiExplorerProps> = ({ onOpenItems }) => {
 
                   <div>
                     <div className="flex items-center justify-between mb-1">
-                      <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">Request body (site_id & token injected automatically)</label>
+                      <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">{'Request body — {{site_id}} and {{token}} are replaced by the active connection values at call time'}</label>
                       <button onClick={() => setBodyText(defaultBodyFor(selected))} className="text-[10px] font-bold text-onestock-blue hover:underline">Reset to example</button>
                     </div>
                     <textarea
