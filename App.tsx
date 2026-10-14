@@ -15,6 +15,7 @@ import StepJsonViewer from './components/StepJsonViewer';
 import StepOrderGeneration from './components/StepOrderGeneration';
 import StepConnections from './components/StepConnections';
 import StepApiExplorer from './components/StepApiExplorer';
+import StepApiLog from './components/StepApiLog';
 import { useActiveConnection, getBaseUrl } from './services/onestockClient';
 import { historyStore, settingsStore } from './services/appStores';
 import { initDbSync } from './services/dbSync';
@@ -194,6 +195,8 @@ const App: React.FC = () => {
             {currentStep === AppStep.CONNECTIONS && <StepConnections />}
 
             {currentStep === AppStep.API_EXPLORER && <StepApiExplorer onOpenItems={(items, label) => handleOpenItems(items, label)} />}
+
+            {currentStep === AppStep.API_LOG && <StepApiLog />}
 
             {currentStep === AppStep.SETTINGS && (
               <Settings settings={settings} onSave={setSettings} />

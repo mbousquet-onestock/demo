@@ -1,5 +1,6 @@
 import { AppSettings, ConnectionInstance, OnestockApiVersion } from '../types';
 import { createPersistedStore } from './persistedStore';
+import { logApiCall } from './apiLog';
 import type { ProxyResponseEnvelope } from '../api/_proxyCore';
 
 export type { ProxyResponseEnvelope };
@@ -69,6 +70,10 @@ export const proxyFetch = async (
   body?: unknown,
   headers?: Record<string, string>
 ): Promise<ProxyResponseEnvelope> => {
+  const started = Date.now();
+  const logFailure = (error: string, status: number | null = null) =>
+    logApiCall({ method, url, request: body, status, ok: false, durationMs: Date.now() - started, error });
+
   let res: Response;
   try {
     res = await fetch(PROXY_ENDPOINT, {
@@ -77,13 +82,29 @@ export const proxyFetch = async (
       body: JSON.stringify({ url, method, body, headers }),
     });
   } catch (err: any) {
-    throw new Error(`Proxy unreachable (${PROXY_ENDPOINT}): ${err?.message || err}`);
+    const message = `Proxy unreachable (${PROXY_ENDPOINT}): ${err?.message || err}`;
+    logFailure(message);
+    throw new Error(message);
   }
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    throw new Error(data?.error || `Proxy error ${res.status}`);
+    const message = data?.error || `Proxy error ${res.status}`;
+    logFailure(message, res.status);
+    throw new Error(message);
   }
-  return data as ProxyResponseEnvelope;
+  const envelope = data as ProxyResponseEnvelope;
+  logApiCall({
+    method,
+    transportMethod: envelope.transportMethod,
+    url,
+    request: body,
+    status: envelope.status,
+    ok: envelope.ok,
+    durationMs: envelope.durationMs,
+    response: envelope.body,
+    requestId: envelope.headers?.['request-id'],
+  });
+  return envelope;
 };
 
 export const describeError = (envelope: ProxyResponseEnvelope): string => {
