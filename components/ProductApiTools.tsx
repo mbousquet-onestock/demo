@@ -1,0 +1,236 @@
+import React, { useMemo, useState } from 'react';
+import { Product, AppSettings } from '../types';
+import { buildItemsPayload, regenerateProductIds, RegenerateIdsOptions } from '../utils/payloadUtils';
+import { onestockRequest, useActiveConnection, redactToken, describeError, ProxyResponseEnvelope } from '../services/onestockClient';
+import { savePayload, downloadJson } from '../services/payloadStore';
+
+const labelClass = 'block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5';
+const inputClass = 'w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:border-onestock-blue';
+
+const Drawer: React.FC<{ title: string; onClose: () => void; wide?: boolean; children: React.ReactNode }> = ({ title, onClose, wide, children }) => (
+  <div className="fixed inset-0 z-[110] flex justify-end animate-in fade-in duration-200">
+    <div className="absolute inset-0 bg-black/20 backdrop-blur-sm" onClick={onClose}></div>
+    <div className={`relative ${wide ? 'w-full max-w-3xl' : 'w-full max-w-md'} bg-white shadow-2xl h-full p-8 overflow-y-auto animate-in slide-in-from-right duration-300 border-l border-gray-200`}>
+      <div className="flex justify-between items-center mb-6">
+        <h3 className="text-xl font-bold text-[#002D72]">{title}</h3>
+        <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+        </button>
+      </div>
+      {children}
+    </div>
+  </div>
+);
+
+interface RegenerateIdsDrawerProps {
+  products: Product[];
+  onApply: (updated: Product[]) => void;
+  onClose: () => void;
+}
+
+export const RegenerateIdsDrawer: React.FC<RegenerateIdsDrawerProps> = ({ products, onApply, onClose }) => {
+  const [options, setOptions] = useState<RegenerateIdsOptions>({
+    prefix: 'DEMO',
+    strategy: 'timestamp',
+    startAt: 1,
+    regenerateParent: true,
+    appendSize: true,
+  });
+  const [seed, setSeed] = useState(0);
+
+  // Recomputed when options change or when the user asks for a new draw (random strategy).
+  const preview = useMemo(() => regenerateProductIds(products, options), [products, options, seed]);
+
+  const set = <K extends keyof RegenerateIdsOptions>(key: K, value: RegenerateIdsOptions[K]) =>
+    setOptions(prev => ({ ...prev, [key]: value }));
+
+  return (
+    <Drawer title="Regenerate product IDs" onClose={onClose} wide>
+      <div className="space-y-6">
+        <p className="text-sm text-gray-500">
+          New <code>id</code> (SKU) and <code>product_id</code> (parent) for the <strong>{products.length}</strong> selected product(s).
+          Variants sharing a parent stay grouped under the same new <code>product_id</code>.
+        </p>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className={labelClass}>Prefix</label>
+            <input className={inputClass} value={options.prefix} onChange={e => set('prefix', e.target.value.replace(/\s+/g, ''))} />
+          </div>
+          <div>
+            <label className={labelClass}>Strategy</label>
+            <select className={inputClass} value={options.strategy} onChange={e => set('strategy', e.target.value as RegenerateIdsOptions['strategy'])}>
+              <option value="timestamp">Timestamp + counter (unique per run)</option>
+              <option value="sequential">Sequential (0001, 0002…)</option>
+              <option value="random">Random</option>
+            </select>
+          </div>
+          {options.strategy !== 'random' && (
+            <div>
+              <label className={labelClass}>Start at</label>
+              <input type="number" min={0} className={inputClass} value={options.startAt} onChange={e => set('startAt', parseInt(e.target.value) || 0)} />
+            </div>
+          )}
+          <div className="col-span-2 flex flex-col gap-2 text-sm text-gray-600">
+            <label className="flex items-center gap-2"><input type="checkbox" checked={options.regenerateParent} onChange={e => set('regenerateParent', e.target.checked)} /> Regenerate parent ID (product_id) too</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={options.appendSize} onChange={e => set('appendSize', e.target.checked)} /> Append size to the item ID</label>
+          </div>
+        </div>
+
+        <div className="border border-gray-200 rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-200">
+            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Preview</span>
+            {options.strategy === 'random' && <button onClick={() => setSeed(s => s + 1)} className="text-[10px] font-bold text-onestock-blue hover:underline">New draw</button>}
+          </div>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-gray-400">
+                <th className="px-4 py-2">Current SKU / parent</th>
+                <th className="px-4 py-2">New SKU / parent</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {preview.slice(0, 12).map((p, i) => (
+                <tr key={p.id}>
+                  <td className="px-4 py-2 font-mono text-gray-500">{products[i].sku}<br /><span className="text-gray-400">{products[i].parentSku}</span></td>
+                  <td className="px-4 py-2 font-mono text-[#002D72] font-bold">{p.sku}<br /><span className="text-gray-400 font-normal">{p.parentSku}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {preview.length > 12 && <p className="px-4 py-2 text-[10px] text-gray-400">…and {preview.length - 12} more</p>}
+        </div>
+
+        <button
+          onClick={() => { onApply(preview); onClose(); }}
+          disabled={products.length === 0}
+          className="w-full py-4 bg-[#002D72] text-white font-bold rounded-xl hover:bg-[#001F4D] shadow-lg disabled:opacity-40"
+        >
+          Apply to {products.length} product(s)
+        </button>
+      </div>
+    </Drawer>
+  );
+};
+
+interface ItemsPushDrawerProps {
+  products: Product[];
+  settings: AppSettings;
+  onClose: () => void;
+}
+
+export const ItemsPushDrawer: React.FC<ItemsPushDrawerProps> = ({ products, settings, onClose }) => {
+  const connection = useActiveConnection();
+  const [method, setMethod] = useState<'PATCH' | 'POST'>('PATCH');
+  const [aggregate, setAggregate] = useState(false);
+  const [onlyIfExists, setOnlyIfExists] = useState(false);
+  const [name, setName] = useState(`Items ${new Date().toLocaleString()}`);
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState<{ url: string; request: unknown; envelope: ProxyResponseEnvelope } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const payload = useMemo(() => ({
+    site_id: connection?.siteId || settings.siteId,
+    aggregate,
+    only_if_exists: onlyIfExists,
+    ...buildItemsPayload(products, settings),
+  }), [products, settings, connection, aggregate, onlyIfExists]);
+
+  const handleSavePayload = (withResult: boolean) => {
+    const err = savePayload({
+      name: name.trim() || `${method} /items`,
+      source: 'products',
+      method,
+      path: '/items',
+      url: withResult ? result?.url : undefined,
+      connectionName: connection?.name,
+      request: withResult && result ? result.request : payload,
+      response: withResult ? result?.envelope.body : undefined,
+      status: withResult ? result?.envelope.status : undefined,
+      durationMs: withResult ? result?.envelope.durationMs : undefined,
+    });
+    setNotice(err || 'Saved in the payload library (see "API Explorer" → Saved payloads).');
+  };
+
+  const handleSend = async () => {
+    if (!connection) return;
+    if (connection.environment === 'prod' && !window.confirm(`Send ${products.length} item(s) to PRODUCTION (${connection.siteId})?`)) return;
+    setSending(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const { site_id, ...body } = payload;
+      const res = await onestockRequest({ method, path: '/items', body });
+      setResult({ url: res.url, request: redactToken(res.requestBody), envelope: res.envelope });
+      if (!res.envelope.ok) setError(describeError(res.envelope));
+    } catch (err: any) {
+      setError(err?.message || String(err));
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <Drawer title="Items payload & API push" onClose={onClose} wide>
+      <div className="space-y-5">
+        <p className="text-sm text-gray-500">
+          Payload for <strong>{products.length}</strong> selected product(s) on sales channel <strong>{settings.salesChannel}</strong>.
+          Target connection: {connection
+            ? <strong>{connection.name} ({connection.siteId}, {connection.environment})</strong>
+            : <span className="text-red-600 font-semibold">none — create one in "Connections"</span>}.
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label className={labelClass}>Method</label>
+            <select className={inputClass} value={method} onChange={e => setMethod(e.target.value as 'PATCH' | 'POST')}>
+              <option value="PATCH">PATCH /items (OneStock spec)</option>
+              <option value="POST">POST /items</option>
+            </select>
+          </div>
+          <label className="flex items-center gap-2 text-sm text-gray-600 md:mt-6"><input type="checkbox" checked={aggregate} onChange={e => setAggregate(e.target.checked)} /> aggregate</label>
+          <label className="flex items-center gap-2 text-sm text-gray-600 md:mt-6"><input type="checkbox" checked={onlyIfExists} onChange={e => setOnlyIfExists(e.target.checked)} /> only_if_exists</label>
+        </div>
+
+        <div>
+          <label className={labelClass}>Payload (token added at send time)</label>
+          <pre className="max-h-[35vh] overflow-auto bg-[#001F4D] text-blue-100 font-mono text-[11px] p-4 rounded-lg whitespace-pre-wrap break-all">
+            {JSON.stringify(payload, null, 2)}
+          </pre>
+        </div>
+
+        <div className="flex flex-wrap gap-2 items-center">
+          <input value={name} onChange={e => setName(e.target.value)} placeholder="Payload name" className="flex-1 min-w-[200px] px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg outline-none" />
+          <button onClick={() => handleSavePayload(false)} className="px-3 py-2 text-xs font-bold text-onestock-blue border border-onestock-blue rounded-lg hover:bg-blue-50">Save payload</button>
+          <button onClick={() => downloadJson(payload, `onestock_items_${Date.now()}`)} className="px-3 py-2 text-xs font-bold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">Download</button>
+          <button
+            onClick={handleSend}
+            disabled={sending || !connection || products.length === 0}
+            className="px-5 py-2 text-xs font-bold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-40"
+          >
+            {sending ? 'Sending…' : `${method} /items`}
+          </button>
+        </div>
+
+        {notice && <p className="text-sm text-blue-900 bg-blue-50 border border-blue-100 rounded-lg p-3">{notice}</p>}
+        {error && <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3 break-words">{error}</p>}
+
+        {result && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-3">
+              <span className={`text-xs font-bold px-2 py-1 rounded ${result.envelope.ok ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                {result.envelope.status} {result.envelope.statusText}
+              </span>
+              <span className="text-xs text-gray-400">{result.envelope.durationMs} ms</span>
+              <button onClick={() => handleSavePayload(true)} className="ml-auto px-3 py-1.5 text-xs font-bold text-onestock-blue border border-onestock-blue rounded-lg hover:bg-blue-50">Save payload + result</button>
+            </div>
+            <p className="text-[10px] font-mono text-gray-400 break-all">{result.url}</p>
+            <pre className="max-h-[30vh] overflow-auto bg-gray-900 text-gray-100 font-mono text-[11px] p-4 rounded-lg whitespace-pre-wrap break-all">
+              {result.envelope.body === null ? '(empty body)' : typeof result.envelope.body === 'string' ? result.envelope.body : JSON.stringify(result.envelope.body, null, 2)}
+            </pre>
+          </div>
+        )}
+      </div>
+    </Drawer>
+  );
+};

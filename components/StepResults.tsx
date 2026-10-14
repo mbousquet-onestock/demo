@@ -4,6 +4,8 @@ import { Product, AppSettings, GroundingSource } from '../types';
 import ImageModal from './ImageModal';
 import EditAssetModal from './EditAssetModal';
 import ProductEditModal from './ProductEditModal';
+import { RegenerateIdsDrawer, ItemsPushDrawer } from './ProductApiTools';
+import { buildItemsPayload } from '../utils/payloadUtils';
 
 interface StepResultsProps {
   products: Product[];
@@ -38,6 +40,8 @@ const StepResults: React.FC<StepResultsProps> = ({
   const [editingAsset, setEditingAsset] = useState<Product | null>(null);
   const [editingProduct, setEditingProduct] = useState<Product | null | 'new'>(null);
   const [isMassEditOpen, setIsMassEditOpen] = useState(false);
+  const [isRegenerateOpen, setIsRegenerateOpen] = useState(false);
+  const [isItemsPushOpen, setIsItemsPushOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   
   const [massEditField, setMassEditField] = useState<keyof Product>('name');
@@ -118,64 +122,7 @@ const StepResults: React.FC<StepResultsProps> = ({
       return;
     }
 
-    const items = selected.map(p => {
-      let features: any = null;
-      if (p.features) {
-        features = JSON.parse(JSON.stringify(p.features));
-        Object.keys(features).forEach(lang => {
-          if (features[lang].libelle_produit) {
-            features[lang].name = features[lang].libelle_produit;
-            delete features[lang].libelle_produit;
-          }
-        });
-      }
-
-      return {
-        id: p.sku,
-        category_ids: [p.category],
-        is_default: true,
-        product_id: p.parentSku,
-        features: features || {
-          en: {
-            color: [p.color],
-            departement: [p.department],
-            subdepartement: [p.subdepartment],
-            image: [p.imageUrl],
-            images_big: [p.imageUrl],
-            long_description: [p.description],
-            name: [p.description], // libelle_produit renamed to name
-            price: [p.price],
-            size: [p.size],
-            weight: [p.weight]
-          },
-          fr: {
-            color: [p.color],
-            departement: [p.department],
-            subdepartement: [p.subdepartment],
-            image: [p.imageUrl],
-            images_big: [p.imageUrl],
-            long_description: [p.description],
-            name: [p.description], // libelle_produit renamed to name
-            price: [p.price],
-            size: [p.size],
-            weight: [p.weight]
-          }
-        },
-        sales_channels_features: {
-          [settings.salesChannel]: {
-            compare_at_price: parseFloat(p.comparePrice || "0"),
-            currency: p.currency,
-            price: parseFloat(p.price)
-          }
-        },
-        length: p.length,
-        width: p.width,
-        height: p.height,
-        weight: p.weight
-      };
-    });
-
-    const jsonContent = JSON.stringify({ items }, null, 4);
+    const jsonContent = JSON.stringify(buildItemsPayload(selected, settings), null, 4);
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(jsonContent);
     const downloadAnchorNode = document.createElement('a');
     downloadAnchorNode.setAttribute("href", dataStr);
@@ -210,6 +157,22 @@ const StepResults: React.FC<StepResultsProps> = ({
           product={editingProduct === 'new' ? null : editingProduct}
           onSave={(p) => editingProduct === 'new' ? onAddProduct(p) : onUpdateProduct(p)}
           onClose={() => setEditingProduct(null)}
+        />
+      )}
+
+      {isRegenerateOpen && (
+        <RegenerateIdsDrawer
+          products={products.filter(p => selectedIds.has(p.id))}
+          onApply={(updated) => updated.forEach(onUpdateProduct)}
+          onClose={() => setIsRegenerateOpen(false)}
+        />
+      )}
+
+      {isItemsPushOpen && (
+        <ItemsPushDrawer
+          products={products.filter(p => selectedIds.has(p.id))}
+          settings={settings}
+          onClose={() => setIsItemsPushOpen(false)}
         />
       )}
 
@@ -332,6 +295,14 @@ const StepResults: React.FC<StepResultsProps> = ({
           </button>
 
           <button 
+            onClick={() => setIsRegenerateOpen(true)}
+            disabled={selectedIds.size === 0}
+            className="px-3 py-2 text-xs font-bold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-all flex items-center gap-2 disabled:opacity-30"
+          >
+            Regenerate IDs
+          </button>
+
+          <button 
             onClick={() => onGenerateJson(products.filter(p => selectedIds.has(p.id)))}
             className="px-3 py-2 text-xs font-bold text-onestock-blue border border-onestock-blue rounded-lg hover:bg-blue-50 transition-all flex items-center gap-2"
           >
@@ -345,7 +316,13 @@ const StepResults: React.FC<StepResultsProps> = ({
             Download
           </button>
           
-          {/* Validate & Import button removed per user request */}
+          <button 
+            onClick={() => setIsItemsPushOpen(true)}
+            disabled={selectedIds.size === 0}
+            className="px-3 py-2 text-xs font-bold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-all flex items-center gap-2 disabled:opacity-30"
+          >
+            Payload & Push /items
+          </button>
         </div>
       </div>
 

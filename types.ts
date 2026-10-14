@@ -42,7 +42,9 @@ export enum AppStep {
   SETTINGS = 'SETTINGS',
   STOCK_UPDATE = 'STOCK_UPDATE',
   JSON_VIEWER = 'JSON_VIEWER',
-  ORDER_GENERATION = 'ORDER_GENERATION'
+  ORDER_GENERATION = 'ORDER_GENERATION',
+  CONNECTIONS = 'CONNECTIONS',
+  API_EXPLORER = 'API_EXPLORER'
 }
 
 export interface ProcessedSite {
@@ -154,3 +156,46 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultWidth: 15,
   defaultLength: 20
 };
+
+export type OnestockEnvironment = 'qualif' | 'prod' | 'custom';
+export type OnestockApiVersion = 'v1' | 'v2' | 'v3' | 'v4';
+
+export interface ConnectionInstance {
+  id: string;
+  name: string;
+  environment: OnestockEnvironment;
+  customBaseUrl?: string;
+  version: OnestockApiVersion;
+  siteId: string;
+  userId: string;
+  password: string;
+  token?: string;
+  tokenObtainedAt?: string;
+  lastError?: string;
+}
+
+export interface SavedPayload {
+  id: string;
+  name: string;
+  createdAt: string;
+  source: 'explorer' | 'products';
+  method: string;
+  path: string;
+  url?: string;
+  connectionName?: string;
+  request?: unknown;
+  response?: unknown;
+  status?: number;
+  durationMs?: number;
+}
+
+export interface OnestockGetEndpoint {
+  path: string;
+  tag: string;
+  summary: string;
+  internal: boolean;
+  pathParams: string[];
+  bodyFields: string[];
+  exampleBody: Record<string, unknown> | null;
+  versions: OnestockApiVersion[];
+}

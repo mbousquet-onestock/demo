@@ -1,16 +1,20 @@
 
 import { Product, AppSettings } from '../types';
+import { onestockRequest, getActiveConnection, connectionFromSettings, describeError } from './onestockClient';
 
 export const exportToOnestockApi = async (
   products: Product[],
   settings: AppSettings,
   onProgress: (msg: string) => void
 ): Promise<void> => {
-  const { apiUrl, siteId, token, salesChannel } = settings;
-
-  const headers = {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${token}`
+  const { salesChannel } = settings;
+  // Uses the active connection instance (token from /login), else the values typed in API Settings.
+  // Every call goes through the Vercel proxy and gets site_id / token injected in its body.
+  const connection = getActiveConnection() || connectionFromSettings(settings);
+  const call = async (method: string, path: string, body: Record<string, unknown>) => {
+    const { envelope } = await onestockRequest({ method, path, body, connection });
+    if (!envelope.ok) throw new Error(describeError(envelope));
+    return envelope.body as any;
   };
 
   const fixedMapping: Record<string, keyof Product | 'none'> = {
@@ -33,20 +37,14 @@ export const exportToOnestockApi = async (
     return val !== undefined ? String(val) : undefined;
   };
 
-  onProgress(`Connecting to: ${settings.apiName}`);
+  onProgress(`Connecting to: ${connection.name}`);
   onProgress('Initializing import session...');
-  const createResponse = await fetch(`${apiUrl}/item_imports`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ site_id: siteId, token: token })
-  });
-
-  if (!createResponse.ok) {
-    const errorText = await createResponse.text();
-    throw new Error(`Failed to create import session: ${errorText}`);
+  let importId: string;
+  try {
+    ({ id: importId } = await call('POST', '/item_imports', {}));
+  } catch (e: any) {
+    throw new Error(`Failed to create import session: ${e.message}`);
   }
-
-  const { id: importId } = await createResponse.json();
   onProgress(`Session created: ID ${importId}`);
 
   onProgress(`Uploading ${products.length} unique articles using dynamic schema...`);
@@ -98,21 +96,36 @@ export const exportToOnestockApi = async (
     return item;
   });
 
-  const uploadResponse = await fetch(`${apiUrl}/item_imports/${importId}/items`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ site_id: siteId, token: token, items: mappedItems })
-  });
-
-  if (!uploadResponse.ok) throw new Error(`Failed to upload items.`);
+  try {
+    await call('POST', `/item_imports/${importId}/items`, { items: mappedItems });
+  } catch (e: any) {
+    throw new Error(`Failed to upload items: ${e.message}`);
+  }
 
   onProgress('Closing import session...');
-  const patchResponse = await fetch(`${apiUrl}/item_imports/${importId}`, {
-    method: 'PATCH',
-    headers,
-    body: JSON.stringify({ site_id: siteId, token: token, item_import: { status: 'closed' } })
-  });
-
-  if (!patchResponse.ok) throw new Error(`Failed to close session.`);
+  try {
+    await call('PATCH', `/item_imports/${importId}`, { item_import: { status: 'closed' } });
+  } catch (e: any) {
+    throw new Error(`Failed to close session: ${e.message}`);
+  }
   onProgress('Import completed successfully!');
+};
+
+// Synchronous stock import (PATCH /stock_import), through the proxy with the active connection.
+export const exportStockToOnestockApi = async (
+  stocks: { item_id: string; endpoint_id: string; quantity: number }[],
+  settings: AppSettings,
+  onProgress: (msg: string) => void
+): Promise<void> => {
+  const connection = getActiveConnection() || connectionFromSettings(settings);
+  onProgress(`Connecting to: ${connection.name}`);
+  onProgress(`Sending ${stocks.length} stock line(s) to PATCH /stock_import...`);
+  const { envelope } = await onestockRequest({
+    method: 'PATCH',
+    path: '/stock_import',
+    body: { import: { incremental: false }, stocks },
+    connection,
+  });
+  if (!envelope.ok) throw new Error(describeError(envelope));
+  onProgress('Stock import completed successfully!');
 };

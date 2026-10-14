@@ -13,6 +13,9 @@ import Settings from './components/Settings';
 import StepStockUpdate from './components/StepStockUpdate';
 import StepJsonViewer from './components/StepJsonViewer';
 import StepOrderGeneration from './components/StepOrderGeneration';
+import StepConnections from './components/StepConnections';
+import StepApiExplorer from './components/StepApiExplorer';
+import { useActiveConnection, getBaseUrl } from './services/onestockClient';
 
 const App: React.FC = () => {
   const [currentStep, setCurrentStep] = useState<AppStep>(AppStep.HISTORY);
@@ -46,6 +49,18 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('onestock_app_settings', JSON.stringify(settings));
   }, [settings]);
+
+  // The active connection's token / site is the one used by every payload and API call of the app.
+  const activeConnection = useActiveConnection();
+  useEffect(() => {
+    if (!activeConnection) return;
+    const apiUrl = getBaseUrl(activeConnection);
+    setSettings(prev => {
+      const token = activeConnection.token || '';
+      if (prev.siteId === activeConnection.siteId && prev.token === token && prev.apiUrl === apiUrl) return prev;
+      return { ...prev, siteId: activeConnection.siteId, token, apiUrl };
+    });
+  }, [activeConnection?.id, activeConnection?.token, activeConnection?.siteId, activeConnection?.environment, activeConnection?.customBaseUrl]);
 
   const handleStartScan = (url: string, limit: number) => {
     setTargetUrl(url);
@@ -159,6 +174,7 @@ const App: React.FC = () => {
         onGoToStock={() => setCurrentStep(AppStep.STOCK_UPDATE)}
         onGoToOrders={() => setCurrentStep(AppStep.ORDER_GENERATION)}
         onGoToResults={() => setCurrentStep(AppStep.RESULTS)}
+        onNavigate={setCurrentStep}
         hasProducts={products.length > 0}
       />
       
@@ -167,6 +183,10 @@ const App: React.FC = () => {
         
         <main className="flex-1 overflow-y-auto p-6 lg:p-10">
           <div className="max-w-6xl mx-auto h-full">
+            {currentStep === AppStep.CONNECTIONS && <StepConnections />}
+
+            {currentStep === AppStep.API_EXPLORER && <StepApiExplorer />}
+
             {currentStep === AppStep.SETTINGS && (
               <Settings settings={settings} onSave={setSettings} />
             )}
