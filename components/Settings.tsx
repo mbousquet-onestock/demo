@@ -1,6 +1,7 @@
 
 import React, { useState, useRef } from 'react';
 import { AppSettings } from '../types';
+import DatabaseSync from './DatabaseSync';
 
 interface SettingsProps {
   settings: AppSettings;
@@ -177,6 +178,8 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
         accept=".json" 
         className="hidden" 
       />
+
+      <DatabaseSync />
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
         <div className="border-b border-gray-100 pb-6 mb-8 flex justify-between items-center">

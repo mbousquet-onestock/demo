@@ -177,6 +177,8 @@ export interface ConnectionInstance {
 export interface SavedPayload {
   id: string;
   name: string;
+  // Free-form project label used to group saved payloads.
+  project?: string;
   createdAt: string;
   source: 'explorer' | 'products';
   method: string;

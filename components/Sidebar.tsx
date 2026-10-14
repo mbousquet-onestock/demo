@@ -2,6 +2,8 @@
 import React from 'react';
 import { AppStep } from '../types';
 import { useActiveConnection } from '../services/onestockClient';
+import { dbStatusStore } from '../services/dbSync';
+import { DB_STATUS_LABELS } from './DatabaseSync';
 
 interface SidebarProps {
   currentStep: AppStep;
@@ -29,6 +31,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   hasProducts
 }) => {
   const activeConnection = useActiveConnection();
+  const dbStatus = dbStatusStore.use();
   const steps = [
     { id: AppStep.HISTORY, label: 'Import History', icon: 'M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.25c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18c-2.305 0-4.408.867-6 2.292m0-14.25v14.25' },
     { id: AppStep.INPUT, label: 'Website Target', icon: 'M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244' },
@@ -103,6 +106,15 @@ const Sidebar: React.FC<SidebarProps> = ({
         ) : (
           <span className="text-white/50">None</span>
         )}
+      </div>
+
+      <div
+        className="mx-4 mb-4 px-4 py-2 rounded-lg bg-white/5 text-xs cursor-pointer hover:bg-white/10 flex items-center gap-2"
+        onClick={onGoToSettings}
+        title={dbStatus.message || 'Database sync'}
+      >
+        <span className={`w-2 h-2 rounded-full ${DB_STATUS_LABELS[dbStatus.state].dot}`}></span>
+        <span className="text-white/70">{DB_STATUS_LABELS[dbStatus.state].label}</span>
       </div>
 
       <div className="p-6 text-white/30 text-xs border-t border-white/10">

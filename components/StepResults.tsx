@@ -4,7 +4,7 @@ import { Product, AppSettings, GroundingSource } from '../types';
 import ImageModal from './ImageModal';
 import EditAssetModal from './EditAssetModal';
 import ProductEditModal from './ProductEditModal';
-import { RegenerateIdsDrawer, ItemsPushDrawer } from './ProductApiTools';
+import { RegenerateIdsDrawer, ItemsPushDrawer, SavedItemsPicker } from './ProductApiTools';
 import { buildItemsPayload } from '../utils/payloadUtils';
 
 interface StepResultsProps {
@@ -19,6 +19,7 @@ interface StepResultsProps {
   onUpdateProduct: (product: Product) => void;
   onAddProduct: (product: Product) => void;
   onDeleteProduct: (id: string) => void;
+  onOpenItems: (items: any[], label: string, mode: 'replace' | 'append') => void;
   isHistoryView?: boolean;
 }
 
@@ -34,6 +35,7 @@ const StepResults: React.FC<StepResultsProps> = ({
   onUpdateProduct,
   onAddProduct,
   onDeleteProduct,
+  onOpenItems,
   isHistoryView = false 
 }) => {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -42,6 +44,7 @@ const StepResults: React.FC<StepResultsProps> = ({
   const [isMassEditOpen, setIsMassEditOpen] = useState(false);
   const [isRegenerateOpen, setIsRegenerateOpen] = useState(false);
   const [isItemsPushOpen, setIsItemsPushOpen] = useState(false);
+  const [isSavedItemsOpen, setIsSavedItemsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   
   const [massEditField, setMassEditField] = useState<keyof Product>('name');
@@ -168,6 +171,14 @@ const StepResults: React.FC<StepResultsProps> = ({
         />
       )}
 
+      {isSavedItemsOpen && (
+        <SavedItemsPicker
+          hasProducts={products.length > 0}
+          onOpen={onOpenItems}
+          onClose={() => setIsSavedItemsOpen(false)}
+        />
+      )}
+
       {isItemsPushOpen && (
         <ItemsPushDrawer
           products={products.filter(p => selectedIds.has(p.id))}
@@ -258,7 +269,7 @@ const StepResults: React.FC<StepResultsProps> = ({
         </div>
       )}
 
-      <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-center justify-between bg-white px-6 py-4 rounded-xl border border-gray-200 shadow-sm">
+      <div className="flex flex-col gap-4 bg-white px-6 py-4 rounded-xl border border-gray-200 shadow-sm">
         <div className="flex-1 min-w-0">
           <h2 className="text-xl font-bold text-[#002D72]">Step 2: Hierarchy Verification</h2>
           <p className="text-sm text-gray-500">Edit cells directly. Only selected items ({selectedIds.size}) are used in subsequent tools.</p>
@@ -277,6 +288,13 @@ const StepResults: React.FC<StepResultsProps> = ({
               className="w-full pl-10 pr-4 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:ring-1 focus:ring-onestock-blue focus:bg-white outline-none transition-all"
             />
           </div>
+
+          <button 
+            onClick={() => setIsSavedItemsOpen(true)}
+            className="px-3 py-2 text-xs font-bold text-onestock-blue border border-onestock-blue rounded-lg hover:bg-blue-50 transition-all flex items-center gap-2"
+          >
+            Open saved items
+          </button>
 
           <button 
             onClick={() => setEditingProduct('new')}

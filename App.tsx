@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { AppStep, Product, ProcessedSite, AppSettings, DEFAULT_SETTINGS, GroundingSource } from './types';
+import { AppStep, Product, ProcessedSite, GroundingSource } from './types';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import StepInput from './components/StepInput';
@@ -16,6 +16,9 @@ import StepOrderGeneration from './components/StepOrderGeneration';
 import StepConnections from './components/StepConnections';
 import StepApiExplorer from './components/StepApiExplorer';
 import { useActiveConnection, getBaseUrl } from './services/onestockClient';
+import { historyStore, settingsStore } from './services/appStores';
+import { initDbSync } from './services/dbSync';
+import { onestockItemsToProducts } from './utils/payloadUtils';
 
 const App: React.FC = () => {
   const [currentStep, setCurrentStep] = useState<AppStep>(AppStep.HISTORY);
@@ -26,29 +29,14 @@ const App: React.FC = () => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectedProductsForJson, setSelectedProductsForJson] = useState<Product[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [history, setHistory] = useState<ProcessedSite[]>([]);
   const [isViewingHistory, setIsViewingHistory] = useState(false);
-  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  // History and settings live in stores cached in localStorage and synced to the Vercel database.
+  const history = historyStore.use();
+  const setHistory = historyStore.set;
+  const settings = settingsStore.use();
+  const setSettings = settingsStore.set;
 
-  useEffect(() => {
-    const savedHistory = localStorage.getItem('onestock_import_history');
-    if (savedHistory) {
-      try { setHistory(JSON.parse(savedHistory)); } catch (e) { console.error(e); }
-    }
-
-    const savedSettings = localStorage.getItem('onestock_app_settings');
-    if (savedSettings) {
-      try { setSettings(JSON.parse(savedSettings)); } catch (e) { console.error(e); }
-    }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem('onestock_import_history', JSON.stringify(history));
-  }, [history]);
-
-  useEffect(() => {
-    localStorage.setItem('onestock_app_settings', JSON.stringify(settings));
-  }, [settings]);
+  useEffect(() => { initDbSync(); }, []);
 
   // The active connection's token / site is the one used by every payload and API call of the app.
   const activeConnection = useActiveConnection();
@@ -97,6 +85,26 @@ const App: React.FC = () => {
       next.delete(id);
       return next;
     });
+  };
+
+  // Loads OneStock items (saved GET /items result or /items payload) into the Product Manager.
+  const handleOpenItems = (items: any[], label: string, mode?: 'replace' | 'append') => {
+    const loaded = onestockItemsToProducts(items, settings.salesChannel);
+    const effectiveMode = mode || (products.length === 0 || window.confirm(
+      `Replace the ${products.length} product(s) currently in the Product Manager with "${label}"?\n(Cancel = add them to the current list)`
+    ) ? 'replace' : 'append');
+    if (effectiveMode === 'replace') {
+      setProducts(loaded);
+      setSelectedIds(new Set(loaded.map(p => p.id)));
+      setTargetUrl('');
+      setGroundingSources([]);
+    } else {
+      setProducts(prev => [...loaded, ...prev]);
+      setSelectedIds(prev => new Set([...prev, ...loaded.map(p => p.id)]));
+    }
+    setIsViewingHistory(false);
+    setError(null);
+    setCurrentStep(AppStep.RESULTS);
   };
 
   const handleStartImport = () => {
@@ -185,7 +193,7 @@ const App: React.FC = () => {
           <div className="max-w-6xl mx-auto h-full">
             {currentStep === AppStep.CONNECTIONS && <StepConnections />}
 
-            {currentStep === AppStep.API_EXPLORER && <StepApiExplorer />}
+            {currentStep === AppStep.API_EXPLORER && <StepApiExplorer onOpenItems={(items, label) => handleOpenItems(items, label)} />}
 
             {currentStep === AppStep.SETTINGS && (
               <Settings settings={settings} onSave={setSettings} />
@@ -244,6 +252,7 @@ const App: React.FC = () => {
                 onUpdateProduct={handleUpdateProduct}
                 onAddProduct={handleAddProduct}
                 onDeleteProduct={handleDeleteProduct}
+                onOpenItems={handleOpenItems}
               />
             )}
 

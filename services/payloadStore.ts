@@ -3,19 +3,13 @@ import { createPersistedStore } from './persistedStore';
 
 export const savedPayloadsStore = createPersistedStore<SavedPayload[]>('onestock_saved_payloads', []);
 
-// Returns an error message when the browser storage quota is exceeded.
-export const savePayload = (entry: Omit<SavedPayload, 'id' | 'createdAt'>): string | null => {
+export const savePayload = (entry: Omit<SavedPayload, 'id' | 'createdAt'>) => {
   const full: SavedPayload = {
     ...entry,
     id: Date.now().toString(36) + Math.random().toString(36).substring(2, 7),
     createdAt: new Date().toISOString(),
   };
-  try {
-    savedPayloadsStore.set(prev => [full, ...prev]);
-    return null;
-  } catch (e: any) {
-    return `Could not save (browser storage full?): ${e?.message || e}. Download the JSON instead.`;
-  }
+  savedPayloadsStore.set(prev => [full, ...prev]);
 };
 
 export const deleteSavedPayload = (id: string) => {
@@ -32,4 +26,20 @@ export const downloadJson = (data: unknown, fileName: string) => {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+};
+
+export const updateSavedPayload = (id: string, patch: Partial<SavedPayload>) => {
+  savedPayloadsStore.set(prev => prev.map(p => (p.id === id ? { ...p, ...patch } : p)));
+};
+
+export const listProjects = (payloads: SavedPayload[]): string[] =>
+  Array.from(new Set(payloads.map(p => (p.project || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+
+// Remembers the last project typed in this browser, to prefill the next save.
+const LAST_PROJECT_KEY = 'onestock_last_project';
+export const getLastProject = () => {
+  try { return localStorage.getItem(LAST_PROJECT_KEY) || ''; } catch { return ''; }
+};
+export const setLastProject = (project: string) => {
+  try { localStorage.setItem(LAST_PROJECT_KEY, project); } catch { /* ignore */ }
 };

@@ -106,3 +106,59 @@ export const regenerateProductIds = (products: Product[], options: RegenerateIds
     return { ...p, sku, parentSku };
   });
 };
+
+// Converts OneStock items (GET /items result or an /items payload) into editable products.
+export const onestockItemsToProducts = (items: any[], salesChannel: string): Product[] =>
+  items.filter(item => item && item.id).map((item, index) => {
+    const features = item.features && typeof item.features === 'object' ? item.features : {};
+    const lang = features.fr ? 'fr' : features.en ? 'en' : Object.keys(features)[0];
+    const values = (lang && features[lang]) || {};
+    const get = (...keys: string[]): string => {
+      for (const key of keys) {
+        const v = values[key];
+        const first = Array.isArray(v) ? v[0] : v;
+        if (first !== undefined && first !== null && first !== '') return String(first);
+      }
+      return '';
+    };
+    const channels = item.sales_channels_features || {};
+    const channel = channels[salesChannel] || channels[Object.keys(channels)[0]] || {};
+    const num = (...candidates: unknown[]) => {
+      for (const c of candidates) {
+        const n = typeof c === 'number' ? c : parseFloat(String(c ?? ''));
+        if (!isNaN(n)) return n;
+      }
+      return 0;
+    };
+    const image = get('image', 'image_url', 'images_big');
+
+    return {
+      id: `${item.id}-${Date.now().toString(36)}${index}`,
+      sku: String(item.id),
+      parentSku: String(item.product_id || item.id),
+      name: get('name', 'libelle_produit'),
+      description: get('long_description', 'description'),
+      imageUrl: image,
+      productUrl: get('url', 'product_url'),
+      price: String(channel.price ?? get('price') ?? ''),
+      comparePrice: channel.compare_at_price !== undefined ? String(channel.compare_at_price) : undefined,
+      currency: String(channel.currency || get('currency') || 'EUR'),
+      color: get('color'),
+      size: get('size'),
+      category: (Array.isArray(item.category_ids) && item.category_ids[0]) || get('category'),
+      department: get('departement', 'department'),
+      subdepartment: get('subdepartement', 'subdepartment'),
+      weight: num(item.weight, get('weight')),
+      length: num(item.length),
+      width: num(item.width),
+      height: num(item.height),
+      images_big: Array.isArray(values.images_big) ? values.images_big.map(String) : image ? [image] : [],
+      features: Object.keys(features).length > 0 ? features : undefined,
+    };
+  });
+
+// Items contained in a GET /items result, or in an /items request payload.
+export const extractOnestockItems = (data: unknown): any[] | null => {
+  const items = (data as any)?.items;
+  return Array.isArray(items) && items.length > 0 ? items : null;
+};

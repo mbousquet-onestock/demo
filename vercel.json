@@ -1,6 +1,7 @@
 {
   "functions": {
-    "api/proxy.ts": { "maxDuration": 60 }
+    "api/proxy.ts": { "maxDuration": 60 },
+    "api/data.ts": { "maxDuration": 30 }
   },
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }

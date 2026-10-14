@@ -7,7 +7,11 @@ import {
   redactToken,
   ProxyResponseEnvelope,
 } from '../services/onestockClient';
-import { savedPayloadsStore, savePayload, deleteSavedPayload, downloadJson } from '../services/payloadStore';
+import {
+  savedPayloadsStore, savePayload, deleteSavedPayload, downloadJson,
+  updateSavedPayload, listProjects, getLastProject, setLastProject,
+} from '../services/payloadStore';
+import { extractOnestockItems } from '../utils/payloadUtils';
 
 const ENDPOINTS = endpointsCatalog as OnestockGetEndpoint[];
 const TAGS = Array.from(new Set(ENDPOINTS.map(e => e.tag))).sort();
@@ -28,7 +32,14 @@ const pickVersion = (endpoint: OnestockGetEndpoint, preferred?: OnestockApiVersi
 const fillPath = (path: string, params: Record<string, string>) =>
   path.replace(/\{([^}]+)\}/g, (_, name) => encodeURIComponent(params[name] || `{${name}}`));
 
-const StepApiExplorer: React.FC = () => {
+interface StepApiExplorerProps {
+  // Opens the items of a GET /items result (or an /items payload) in the Product Manager.
+  onOpenItems: (items: any[], label: string) => void;
+}
+
+const NO_PROJECT_FILTER = '__none__';
+
+const StepApiExplorer: React.FC<StepApiExplorerProps> = ({ onOpenItems }) => {
   const connection = useActiveConnection();
   const savedPayloads = savedPayloadsStore.use();
 
@@ -47,9 +58,13 @@ const StepApiExplorer: React.FC = () => {
   const [lastCall, setLastCall] = useState<{ url: string; path: string; request: unknown; envelope: ProxyResponseEnvelope } | null>(null);
   const [callError, setCallError] = useState<string | null>(null);
   const [saveName, setSaveName] = useState('');
+  const [saveProject, setSaveProject] = useState(getLastProject());
   const [notice, setNotice] = useState<string | null>(null);
 
   const [savedFilter, setSavedFilter] = useState('');
+  const [projectFilter, setProjectFilter] = useState('');
+  const [editing, setEditing] = useState<{ id: string; name: string; project: string } | null>(null);
+  const projects = useMemo(() => listProjects(savedPayloads), [savedPayloads]);
   const [expandedSavedId, setExpandedSavedId] = useState<string | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
 
@@ -111,13 +126,18 @@ const StepApiExplorer: React.FC = () => {
 
   const handleSave = (what: 'both' | 'request' | 'response') => {
     if (!selected) return;
+    if (!saveName.trim()) {
+      setNotice('Give the payload a name before saving it.');
+      return;
+    }
     const body = parseBody();
     if (body === undefined) return;
     // "Save request" stores the editor content; the other modes store what was actually sent.
     const fromLastCall = what !== 'request' && lastCall;
     const path = fromLastCall ? lastCall.path : fillPath(selected.path, pathParams);
     const entry: Omit<SavedPayload, 'id' | 'createdAt'> = {
-      name: saveName.trim() || `GET ${path}`,
+      name: saveName.trim(),
+      project: saveProject.trim() || undefined,
       source: 'explorer',
       method: 'GET',
       path,
@@ -128,8 +148,9 @@ const StepApiExplorer: React.FC = () => {
       status: what === 'request' ? undefined : lastCall?.envelope.status,
       durationMs: what === 'request' ? undefined : lastCall?.envelope.durationMs,
     };
-    const err = savePayload(entry);
-    setNotice(err || `Saved "${entry.name}".`);
+    savePayload(entry);
+    setLastProject(saveProject.trim());
+    setNotice(`Saved "${entry.name}"${entry.project ? ` in project "${entry.project}"` : ''}.`);
   };
 
   const loadSaved = (entry: SavedPayload) => {
@@ -175,8 +196,28 @@ const StepApiExplorer: React.FC = () => {
 
   const filteredSaved = savedPayloads.filter(p => {
     const q = savedFilter.trim().toLowerCase();
-    return !q || p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q);
+    const project = (p.project || '').trim();
+    if (projectFilter === NO_PROJECT_FILTER ? project !== '' : projectFilter && project !== projectFilter) return false;
+    return !q || p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q) || project.toLowerCase().includes(q);
   });
+
+  // Saved payloads grouped by project (payloads without project last).
+  const savedGroups = useMemo(() => {
+    const groups = new Map<string, SavedPayload[]>();
+    filteredSaved.forEach(p => {
+      const key = (p.project || '').trim();
+      groups.set(key, [...(groups.get(key) || []), p]);
+    });
+    return [...groups.entries()].sort(([a], [b]) => (a === '' ? 1 : b === '' ? -1 : a.localeCompare(b)));
+  }, [filteredSaved]);
+
+  const saveEdit = () => {
+    if (!editing || !editing.name.trim()) return;
+    updateSavedPayload(editing.id, { name: editing.name.trim(), project: editing.project.trim() || undefined });
+    setEditing(null);
+  };
+
+  const lastCallItems = lastCall?.path === '/items' ? extractOnestockItems(lastCall.envelope.body) : null;
 
   const statusColor = (status?: number) =>
     !status ? 'bg-gray-100 text-gray-600' : status < 300 ? 'bg-green-100 text-green-700' : status < 500 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700';
@@ -196,6 +237,10 @@ const StepApiExplorer: React.FC = () => {
           <button onClick={() => setTab('saved')} className={`px-4 py-2 rounded-md ${tab === 'saved' ? 'bg-white text-[#002D72] shadow-sm' : 'text-gray-500'}`}>Saved payloads ({savedPayloads.length})</button>
         </div>
       </div>
+
+      <datalist id="saved-payload-projects">
+        {projects.map(p => <option key={p} value={p} />)}
+      </datalist>
 
       {notice && <div className="p-3 rounded-lg bg-blue-50 border border-blue-100 text-sm text-blue-900">{notice}</div>}
 
@@ -299,13 +344,20 @@ const StepApiExplorer: React.FC = () => {
                       {loading ? 'Calling…' : 'Send'}
                     </button>
                     <input
+                      value={saveProject}
+                      onChange={e => setSaveProject(e.target.value)}
+                      list="saved-payload-projects"
+                      placeholder="Project"
+                      className="w-40 px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg outline-none"
+                    />
+                    <input
                       value={saveName}
                       onChange={e => setSaveName(e.target.value)}
-                      placeholder="Name for saving (optional)"
+                      placeholder="Payload name (required to save)"
                       className="flex-1 min-w-[180px] px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg outline-none"
                     />
-                    <button onClick={() => handleSave('request')} className="px-3 py-2 text-xs font-bold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">Save request</button>
-                    <button onClick={() => handleSave('both')} disabled={!lastCall} className="px-3 py-2 text-xs font-bold text-onestock-blue border border-onestock-blue rounded-lg hover:bg-blue-50 disabled:opacity-40">Save request + result</button>
+                    <button onClick={() => handleSave('request')} disabled={!saveName.trim()} className="px-3 py-2 text-xs font-bold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-40">Save request</button>
+                    <button onClick={() => handleSave('both')} disabled={!lastCall || !saveName.trim()} className="px-3 py-2 text-xs font-bold text-onestock-blue border border-onestock-blue rounded-lg hover:bg-blue-50 disabled:opacity-40">Save request + result</button>
                   </div>
                   {callError && <p className="text-sm text-red-600 break-words">{callError}</p>}
                 </div>
@@ -321,7 +373,12 @@ const StepApiExplorer: React.FC = () => {
                         <span className="text-[10px] font-mono text-gray-400">Request-Id: {lastCall.envelope.headers['request-id']}</span>
                       )}
                       <div className="ml-auto flex gap-2">
-                        <button onClick={() => handleSave('response')} className="px-3 py-1.5 text-xs font-bold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">Save result</button>
+                        {lastCallItems && (
+                          <button onClick={() => onOpenItems(lastCallItems, saveName.trim() || `GET ${lastCall.path}`)} className="px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700">
+                            Open {lastCallItems.length} item(s) in Product Manager
+                          </button>
+                        )}
+                        <button onClick={() => handleSave('response')} disabled={!saveName.trim()} title={saveName.trim() ? '' : 'Name the payload first'} className="px-3 py-1.5 text-xs font-bold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-40">Save result</button>
                         <button onClick={() => navigator.clipboard.writeText(JSON.stringify(lastCall.envelope.body, null, 2))} className="px-3 py-1.5 text-xs font-bold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">Copy</button>
                         <button onClick={() => downloadJson({ request: lastCall.request, response: lastCall.envelope.body, status: lastCall.envelope.status, url: lastCall.url }, `onestock_GET${lastCall.path.replace(/[^a-z0-9]+/gi, '_')}_${Date.now()}`)} className="px-3 py-1.5 text-xs font-bold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">Download</button>
                       </div>
@@ -347,6 +404,11 @@ const StepApiExplorer: React.FC = () => {
               placeholder="Filter saved payloads…"
               className="flex-1 min-w-[200px] px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg outline-none"
             />
+            <select value={projectFilter} onChange={e => setProjectFilter(e.target.value)} className="px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg outline-none">
+              <option value="">All projects</option>
+              {projects.map(p => <option key={p} value={p}>{p}</option>)}
+              <option value={NO_PROJECT_FILTER}>No project</option>
+            </select>
             <input type="file" ref={importRef} accept=".json" className="hidden" onChange={handleImportSaved} />
             <button onClick={() => importRef.current?.click()} className="px-3 py-2 text-xs font-bold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">Import</button>
             <button onClick={() => downloadJson(savedPayloads, `onestock_saved_payloads_${Date.now()}`)} disabled={savedPayloads.length === 0} className="px-3 py-2 text-xs font-bold text-onestock-blue border border-onestock-blue rounded-lg hover:bg-blue-50 disabled:opacity-40">Export all</button>
@@ -354,17 +416,37 @@ const StepApiExplorer: React.FC = () => {
           {filteredSaved.length === 0 ? (
             <p className="p-12 text-center text-sm text-gray-400">No saved payload.</p>
           ) : (
-            <ul className="divide-y divide-gray-100">
-              {filteredSaved.map(p => (
+            <div>
+              {savedGroups.map(([project, entries]) => (
+              <div key={project || NO_PROJECT_FILTER}>
+              <div className="px-4 py-2 bg-gray-50 border-y border-gray-100 flex items-center gap-2">
+                <span className="text-xs font-bold text-[#002D72] uppercase tracking-widest">{project || 'No project'}</span>
+                <span className="text-[10px] text-gray-400">{entries.length} payload(s)</span>
+              </div>
+              <ul className="divide-y divide-gray-100">
+              {entries.map(p => (
                 <li key={p.id} className="p-4 space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className={`text-[9px] font-bold px-1.5 rounded ${p.method === 'GET' ? 'text-emerald-700 bg-emerald-50' : 'text-orange-700 bg-orange-50'}`}>{p.method}</span>
-                    <span className="font-bold text-sm text-gray-900">{p.name}</span>
+                    {editing?.id === p.id ? (
+                      <>
+                        <input value={editing.project} onChange={e => setEditing({ ...editing, project: e.target.value })} list="saved-payload-projects" placeholder="Project" className="w-32 px-2 py-1 text-xs bg-gray-50 border border-gray-200 rounded outline-none" />
+                        <input value={editing.name} onChange={e => setEditing({ ...editing, name: e.target.value })} onKeyDown={e => e.key === 'Enter' && saveEdit()} placeholder="Name" className="w-56 px-2 py-1 text-xs bg-gray-50 border border-gray-200 rounded outline-none" />
+                        <button onClick={saveEdit} disabled={!editing.name.trim()} className="px-2 py-1 text-[11px] font-bold text-white bg-onestock-blue rounded disabled:opacity-40">OK</button>
+                        <button onClick={() => setEditing(null)} className="px-2 py-1 text-[11px] font-bold text-gray-500">Cancel</button>
+                      </>
+                    ) : (
+                      <span className="font-bold text-sm text-gray-900">{p.name}</span>
+                    )}
                     <span className="font-mono text-[11px] text-gray-500">{p.path}</span>
                     {p.status !== undefined && <span className={`text-[10px] font-bold px-1.5 rounded ${statusColor(p.status)}`}>{p.status}</span>}
                     <span className="text-[10px] text-gray-400">{p.source} · {p.connectionName || '—'} · {new Date(p.createdAt).toLocaleString()}</span>
                     <span className="text-[10px] text-gray-400">{p.request !== undefined ? 'request' : ''}{p.request !== undefined && p.response !== undefined ? ' + ' : ''}{p.response !== undefined ? 'result' : ''}</span>
                     <div className="ml-auto flex gap-2">
+                      {(extractOnestockItems(p.response) || extractOnestockItems(p.request)) && (
+                        <button onClick={() => onOpenItems((extractOnestockItems(p.response) || extractOnestockItems(p.request))!, p.name)} className="px-2 py-1 text-[11px] font-bold text-white bg-emerald-600 rounded hover:bg-emerald-700">Open in Product Manager</button>
+                      )}
+                      <button onClick={() => setEditing({ id: p.id, name: p.name, project: p.project || '' })} className="px-2 py-1 text-[11px] font-bold text-gray-600 border border-gray-300 rounded hover:bg-gray-50">Rename</button>
                       <button onClick={() => setExpandedSavedId(expandedSavedId === p.id ? null : p.id)} className="px-2 py-1 text-[11px] font-bold text-gray-600 border border-gray-300 rounded hover:bg-gray-50">{expandedSavedId === p.id ? 'Hide' : 'View'}</button>
                       {p.method === 'GET' && <button onClick={() => loadSaved(p)} className="px-2 py-1 text-[11px] font-bold text-onestock-blue border border-onestock-blue rounded hover:bg-blue-50">Load in explorer</button>}
                       <button onClick={() => downloadJson(p, `${p.name.replace(/[^a-z0-9]+/gi, '_')}_${p.id}`)} className="px-2 py-1 text-[11px] font-bold text-gray-600 border border-gray-300 rounded hover:bg-gray-50">Download</button>
@@ -385,7 +467,10 @@ const StepApiExplorer: React.FC = () => {
                   )}
                 </li>
               ))}
-            </ul>
+              </ul>
+              </div>
+              ))}
+            </div>
           )}
         </div>
       )}

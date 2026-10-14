@@ -1,8 +1,8 @@
 import React, { useMemo, useState } from 'react';
-import { Product, AppSettings } from '../types';
-import { buildItemsPayload, regenerateProductIds, RegenerateIdsOptions } from '../utils/payloadUtils';
+import { Product, AppSettings, SavedPayload } from '../types';
+import { buildItemsPayload, regenerateProductIds, RegenerateIdsOptions, extractOnestockItems } from '../utils/payloadUtils';
 import { onestockRequest, useActiveConnection, redactToken, describeError, ProxyResponseEnvelope } from '../services/onestockClient';
-import { savePayload, downloadJson } from '../services/payloadStore';
+import { savePayload, downloadJson, savedPayloadsStore, listProjects, getLastProject, setLastProject } from '../services/payloadStore';
 
 const labelClass = 'block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5';
 const inputClass = 'w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:border-onestock-blue';
@@ -123,7 +123,9 @@ export const ItemsPushDrawer: React.FC<ItemsPushDrawerProps> = ({ products, sett
   const [method, setMethod] = useState<'PATCH' | 'POST'>('PATCH');
   const [aggregate, setAggregate] = useState(false);
   const [onlyIfExists, setOnlyIfExists] = useState(false);
-  const [name, setName] = useState(`Items ${new Date().toLocaleString()}`);
+  const [name, setName] = useState('');
+  const [project, setProject] = useState(getLastProject());
+  const projects = listProjects(savedPayloadsStore.use());
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<{ url: string; request: unknown; envelope: ProxyResponseEnvelope } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -137,8 +139,14 @@ export const ItemsPushDrawer: React.FC<ItemsPushDrawerProps> = ({ products, sett
   }), [products, settings, connection, aggregate, onlyIfExists]);
 
   const handleSavePayload = (withResult: boolean) => {
-    const err = savePayload({
-      name: name.trim() || `${method} /items`,
+    if (!name.trim()) {
+      setNotice('Give the payload a name before saving it.');
+      return;
+    }
+    setLastProject(project.trim());
+    savePayload({
+      name: name.trim(),
+      project: project.trim() || undefined,
       source: 'products',
       method,
       path: '/items',
@@ -149,7 +157,7 @@ export const ItemsPushDrawer: React.FC<ItemsPushDrawerProps> = ({ products, sett
       status: withResult ? result?.envelope.status : undefined,
       durationMs: withResult ? result?.envelope.durationMs : undefined,
     });
-    setNotice(err || 'Saved in the payload library (see "API Explorer" → Saved payloads).');
+    setNotice('Saved in the payload library (see "API Explorer" → Saved payloads).');
   };
 
   const handleSend = async () => {
@@ -200,8 +208,10 @@ export const ItemsPushDrawer: React.FC<ItemsPushDrawerProps> = ({ products, sett
         </div>
 
         <div className="flex flex-wrap gap-2 items-center">
-          <input value={name} onChange={e => setName(e.target.value)} placeholder="Payload name" className="flex-1 min-w-[200px] px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg outline-none" />
-          <button onClick={() => handleSavePayload(false)} className="px-3 py-2 text-xs font-bold text-onestock-blue border border-onestock-blue rounded-lg hover:bg-blue-50">Save payload</button>
+          <input value={project} onChange={e => setProject(e.target.value)} list="items-push-projects" placeholder="Project" className="w-36 px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg outline-none" />
+          <datalist id="items-push-projects">{projects.map(p => <option key={p} value={p} />)}</datalist>
+          <input value={name} onChange={e => setName(e.target.value)} placeholder="Payload name (required to save)" className="flex-1 min-w-[200px] px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg outline-none" />
+          <button onClick={() => handleSavePayload(false)} disabled={!name.trim()} className="px-3 py-2 text-xs font-bold text-onestock-blue border border-onestock-blue rounded-lg hover:bg-blue-50 disabled:opacity-40">Save payload</button>
           <button onClick={() => downloadJson(payload, `onestock_items_${Date.now()}`)} className="px-3 py-2 text-xs font-bold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">Download</button>
           <button
             onClick={handleSend}
@@ -222,13 +232,88 @@ export const ItemsPushDrawer: React.FC<ItemsPushDrawerProps> = ({ products, sett
                 {result.envelope.status} {result.envelope.statusText}
               </span>
               <span className="text-xs text-gray-400">{result.envelope.durationMs} ms</span>
-              <button onClick={() => handleSavePayload(true)} className="ml-auto px-3 py-1.5 text-xs font-bold text-onestock-blue border border-onestock-blue rounded-lg hover:bg-blue-50">Save payload + result</button>
+              <button onClick={() => handleSavePayload(true)} disabled={!name.trim()} className="disabled:opacity-40 ml-auto px-3 py-1.5 text-xs font-bold text-onestock-blue border border-onestock-blue rounded-lg hover:bg-blue-50">Save payload + result</button>
             </div>
             <p className="text-[10px] font-mono text-gray-400 break-all">{result.url}</p>
             <pre className="max-h-[30vh] overflow-auto bg-gray-900 text-gray-100 font-mono text-[11px] p-4 rounded-lg whitespace-pre-wrap break-all">
               {result.envelope.body === null ? '(empty body)' : typeof result.envelope.body === 'string' ? result.envelope.body : JSON.stringify(result.envelope.body, null, 2)}
             </pre>
           </div>
+        )}
+      </div>
+    </Drawer>
+  );
+};
+
+interface SavedItemsPickerProps {
+  hasProducts: boolean;
+  onOpen: (items: any[], label: string, mode: 'replace' | 'append') => void;
+  onClose: () => void;
+}
+
+// Lists saved payloads holding OneStock items (GET /items results, /items payloads), grouped by project.
+export const SavedItemsPicker: React.FC<SavedItemsPickerProps> = ({ hasProducts, onOpen, onClose }) => {
+  const saved = savedPayloadsStore.use();
+  const [project, setProject] = useState('');
+  const [search, setSearch] = useState('');
+
+  const candidates = useMemo(() => saved
+    .map(p => ({ payload: p, items: extractOnestockItems(p.response) || extractOnestockItems(p.request), fromResult: !!extractOnestockItems(p.response) }))
+    .filter((c): c is { payload: SavedPayload; items: any[]; fromResult: boolean } => !!c.items), [saved]);
+  const projects = listProjects(candidates.map(c => c.payload));
+
+  const visible = candidates.filter(({ payload }) => {
+    const q = search.trim().toLowerCase();
+    if (project && (payload.project || '') !== project) return false;
+    return !q || payload.name.toLowerCase().includes(q) || (payload.project || '').toLowerCase().includes(q);
+  });
+
+  const open = (items: any[], label: string, mode: 'replace' | 'append') => {
+    onOpen(items, label, mode);
+    onClose();
+  };
+
+  return (
+    <Drawer title="Open saved items" onClose={onClose} wide>
+      <div className="space-y-4">
+        <p className="text-sm text-gray-500">
+          Saved payloads containing OneStock items: results of <code>GET /items</code> from the API Explorer, and saved <code>/items</code> payloads.
+        </p>
+        <div className="flex gap-2">
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or project…" className="flex-1 px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg outline-none" />
+          <select value={project} onChange={e => setProject(e.target.value)} className="px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg outline-none">
+            <option value="">All projects</option>
+            {projects.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </div>
+        {visible.length === 0 ? (
+          <p className="p-10 text-center text-sm text-gray-400 border border-dashed border-gray-200 rounded-xl">
+            No saved payload with items. Call <code>GET /items</code> in the API Explorer and save the result.
+          </p>
+        ) : (
+          <ul className="divide-y divide-gray-100 border border-gray-200 rounded-xl">
+            {visible.map(({ payload, items, fromResult }) => (
+              <li key={payload.id} className="p-4 flex flex-wrap items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {payload.project && <span className="text-[9px] font-bold uppercase bg-blue-50 text-onestock-blue px-1.5 py-0.5 rounded">{payload.project}</span>}
+                    <span className="font-bold text-sm text-gray-900">{payload.name}</span>
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-0.5">
+                    {payload.method} {payload.path} · {fromResult ? 'result' : 'request'} · {items.length} item(s) · {payload.connectionName || '—'} · {new Date(payload.createdAt).toLocaleString()}
+                  </p>
+                </div>
+                <button onClick={() => open(items, payload.name, 'replace')} className="px-3 py-1.5 text-xs font-bold text-white bg-onestock-blue rounded-lg hover:bg-[#001F4D]">
+                  {hasProducts ? 'Replace current list' : 'Open'}
+                </button>
+                {hasProducts && (
+                  <button onClick={() => open(items, payload.name, 'append')} className="px-3 py-1.5 text-xs font-bold text-onestock-blue border border-onestock-blue rounded-lg hover:bg-blue-50">
+                    Add to list
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
         )}
       </div>
     </Drawer>

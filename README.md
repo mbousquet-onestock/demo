@@ -31,5 +31,25 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
   and pick the active one. Its token and site ID are injected in every API call and payload of the app
   (automatic re-login on 401).
 - **API Explorer**: all GET routes of the OneStock spec (`data/onestockGetEndpoints.json`, generated from the
-  OpenAPI file), with request / result saving (local storage, import / export JSON).
-- **Product Manager**: regenerate item / product IDs, build the `/items` payload, save it, and send it with `PATCH /items`.
+  OpenAPI file). Requests / results are saved with a required name and an optional project, and listed by project.
+  `GET /items` results can be opened in the Product Manager.
+- **Product Manager**: open saved `GET /items` results, regenerate item / product IDs, build the `/items` payload, save it, and send it with `PATCH /items`.
+
+## Database (Vercel Postgres / Neon)
+
+Import history, settings, connection instances (credentials and tokens included) and saved payloads are stored in
+Postgres through the `api/data.ts` function (one `app_documents` table, created automatically). Each browser keeps a
+localStorage copy as cache; the first sync of a browser uploads its local data, afterwards the database wins.
+
+1. Vercel dashboard → project → **Storage** → create a **Neon** (Postgres) database and connect it to the project
+   (this adds `DATABASE_URL`).
+2. Add an `APP_ACCESS_KEY` environment variable (a long random secret) and redeploy. The data API refuses every call
+   without it.
+3. In the app, **API Settings → Database**: enter the same key once per browser.
+
+Local development: put `DATABASE_URL` and `APP_ACCESS_KEY` in `.env.local`. To use a local Postgres instead of Neon,
+run the [local Neon HTTP proxy](https://github.com/TimoWilhelm/local-neon-http-proxy) and set
+`NEON_FETCH_ENDPOINT=http://db.localtest.me:4444/sql`.
+
+Limits: each request to a Vercel function is capped at 4.5 MB, so a single document (e.g. an import with many
+base64 images) above ~3.5 MB cannot be saved; the sync status in the sidebar shows the error.

@@ -1,29 +1,22 @@
 import { useSyncExternalStore } from 'react';
 
-// Minimal localStorage-backed store usable from React components (via the hook) and plain services.
-export interface PersistedStore<T> {
+// Minimal store usable from React components (via the hook) and plain services.
+export interface Store<T> {
   get: () => T;
   set: (next: T | ((prev: T) => T)) => void;
   subscribe: (listener: () => void) => () => void;
   use: () => T;
 }
 
-export const createPersistedStore = <T,>(key: string, initial: T): PersistedStore<T> => {
+export const createStore = <T,>(initial: T, onChange?: (value: T) => void): Store<T> => {
   let state: T = initial;
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw) state = JSON.parse(raw);
-  } catch (e) {
-    console.error(`Failed to read ${key} from localStorage`, e);
-  }
-
   const listeners = new Set<() => void>();
 
   const set = (next: T | ((prev: T) => T)) => {
     const value = typeof next === 'function' ? (next as (prev: T) => T)(state) : next;
-    // Persist first so a quota error surfaces to the caller without diverging from storage.
-    localStorage.setItem(key, JSON.stringify(value));
+    if (value === state) return;
     state = value;
+    onChange?.(value);
     listeners.forEach(l => l());
   };
 
@@ -34,10 +27,25 @@ export const createPersistedStore = <T,>(key: string, initial: T): PersistedStor
 
   const get = () => state;
 
-  return {
-    get,
-    set,
-    subscribe,
-    use: () => useSyncExternalStore(subscribe, get),
-  };
+  return { get, set, subscribe, use: () => useSyncExternalStore(subscribe, get) };
+};
+
+// Store cached in localStorage. The database (see dbSync.ts) is the shared copy;
+// a full localStorage only degrades the local cache, it never blocks an update.
+export const createPersistedStore = <T,>(key: string, initial: T): Store<T> => {
+  let cached: T = initial;
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) cached = JSON.parse(raw);
+  } catch (e) {
+    console.error(`Failed to read ${key} from localStorage`, e);
+  }
+
+  return createStore(cached, value => {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch (e) {
+      console.warn(`Local cache not updated for ${key} (storage full?)`, e);
+    }
+  });
 };
