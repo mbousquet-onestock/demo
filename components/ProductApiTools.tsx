@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Product, AppSettings, SavedPayload } from '../types';
 import { buildItemsPayload, regenerateProductIds, RegenerateIdsOptions, extractOnestockItems } from '../utils/payloadUtils';
 import { onestockRequest, useApiTarget, missingTargetFields, isProductionTarget, describeCallError, ProxyResponseEnvelope, SITE_ID_VAR, TOKEN_VAR } from '../services/onestockClient';
-import { savePayload, downloadJson, savedPayloadsStore, listProjects, getLastProject, setLastProject, updateSavedPayload } from '../services/payloadStore';
+import { savePayload, downloadJson, savedPayloadsStore, listProjects, getLastProject, setLastProject, updateSavedPayload, SOURCE_LABELS } from '../services/payloadStore';
 
 const labelClass = 'block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5';
 const inputClass = 'w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:border-onestock-blue';
@@ -407,7 +407,7 @@ export const SavedItemsPicker: React.FC<SavedItemsPickerProps> = ({ hasProducts,
                         <div className="min-w-0 flex-1">
                           <span className="font-bold text-sm text-gray-900">{payload.name}</span>
                           <p className="text-[11px] text-gray-400 mt-0.5">
-                            {payload.method} {payload.path} · {fromResult ? 'result' : 'request'} · {items.length} item(s) · {payload.source === 'products' ? 'Product Manager' : 'API Explorer'} · {new Date(payload.createdAt).toLocaleString()}
+                            {payload.method} {payload.path} · {fromResult ? 'result' : 'request'} · {items.length} item(s) · {SOURCE_LABELS[payload.source] || payload.source} · {new Date(payload.createdAt).toLocaleString()}
                           </p>
                         </div>
                         {loadButtons(items, payload.name, payload.project, !severalLoadable)}
@@ -418,7 +418,7 @@ export const SavedItemsPicker: React.FC<SavedItemsPickerProps> = ({ hasProducts,
                         <div className="min-w-0 flex-1">
                           <span className="font-bold text-sm text-gray-900">{payload.name}</span>
                           <p className="text-[11px] text-gray-400 mt-0.5">
-                            GET /items · request saved without items · {payload.source === 'products' ? 'Product Manager' : 'API Explorer'} · {new Date(payload.createdAt).toLocaleString()}
+                            GET /items · request saved without items · {SOURCE_LABELS[payload.source] || payload.source} · {new Date(payload.createdAt).toLocaleString()}
                           </p>
                           {runError?.id === payload.id && <p className="text-[11px] text-red-600 mt-1 break-words">{runError.message}</p>}
                           {targetMissing && <p className="text-[11px] text-amber-600 mt-1">Missing in API Settings: {targetMissing}</p>}

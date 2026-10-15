@@ -1,8 +1,13 @@
 // Stock point (endpoint) ids found in a saved payload: GET /endpoints result ({ endpoints: [...] }),
-// POST /endpoints payload ({ endpoint } or { endpoints }), or a plain array of ids / endpoints.
+// POST /endpoints payload ({ endpoint } or { endpoints }), /stock_import payload, or a plain array of ids / endpoints.
 export const extractEndpointIds = (data: unknown): string[] | null => {
   const d = data as any;
-  const list = Array.isArray(d) ? d : Array.isArray(d?.endpoints) ? d.endpoints : d?.endpoint ? [d.endpoint] : null;
+  const list = Array.isArray(d) ? d
+    : Array.isArray(d?.endpoints) ? d.endpoints
+    : d?.endpoint ? [d.endpoint]
+    // /stock_import payload: the stock points of its lines.
+    : Array.isArray(d?.stocks) ? d.stocks.map((l: any) => l?.endpoint_id)
+    : null;
   if (!list) return null;
   const ids = list
     .map((e: any) => (typeof e === 'string' ? e : e?.id))

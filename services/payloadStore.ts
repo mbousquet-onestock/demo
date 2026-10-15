@@ -43,3 +43,9 @@ export const getLastProject = () => {
 export const setLastProject = (project: string) => {
   try { localStorage.setItem(LAST_PROJECT_KEY, project); } catch { /* ignore */ }
 };
+
+export const SOURCE_LABELS: Record<SavedPayload['source'], string> = {
+  explorer: 'API Explorer',
+  products: 'Product Manager',
+  stock: 'Inventory Management',
+};

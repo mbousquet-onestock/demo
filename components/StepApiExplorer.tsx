@@ -11,7 +11,7 @@ import {
 } from '../services/onestockClient';
 import {
   savedPayloadsStore, savePayload, deleteSavedPayload, downloadJson,
-  updateSavedPayload, listProjects, getLastProject, setLastProject,
+  updateSavedPayload, listProjects, getLastProject, setLastProject, SOURCE_LABELS,
 } from '../services/payloadStore';
 import { extractOnestockItems } from '../utils/payloadUtils';
 
@@ -448,7 +448,7 @@ const StepApiExplorer: React.FC<StepApiExplorerProps> = ({ onOpenItems }) => {
                     )}
                     <span className="font-mono text-[11px] text-gray-500">{p.path}</span>
                     {p.status !== undefined && <span className={`text-[10px] font-bold px-1.5 rounded ${statusColor(p.status)}`}>{p.status}</span>}
-                    <span className="text-[10px] text-gray-400">{p.source} · {p.connectionName || '—'} · {new Date(p.createdAt).toLocaleString()}</span>
+                    <span className="text-[10px] text-gray-400">{SOURCE_LABELS[p.source] || p.source} · {p.connectionName || '—'} · {new Date(p.createdAt).toLocaleString()}</span>
                     <span className="text-[10px] text-gray-400">{p.request !== undefined ? 'request' : ''}{p.request !== undefined && p.response !== undefined ? ' + ' : ''}{p.response !== undefined ? 'result' : ''}</span>
                     <div className="ml-auto flex gap-2">
                       {(extractOnestockItems(p.response) || extractOnestockItems(p.request)) && (

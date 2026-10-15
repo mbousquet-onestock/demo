@@ -173,7 +173,7 @@ export interface SavedPayload {
   // Free-form project label used to group saved payloads.
   project?: string;
   createdAt: string;
-  source: 'explorer' | 'products';
+  source: 'explorer' | 'products' | 'stock';
   method: string;
   path: string;
   url?: string;

@@ -1,7 +1,10 @@
 
 import React, { useState, useMemo } from 'react';
-import { SITE_ID_VAR, TOKEN_VAR } from '../services/onestockClient';
-import { Product, AppSettings } from '../types';
+import { SITE_ID_VAR, TOKEN_VAR, useApiTarget, missingTargetFields, isProductionTarget } from '../services/onestockClient';
+import { savedPayloadsStore, savePayload, listProjects, getLastProject, setLastProject, downloadJson, SOURCE_LABELS } from '../services/payloadStore';
+import { pushStockImport, StockChunkResult, StockImportPayload, StockLine, STOCK_IMPORT_MAX_LINES } from '../services/stockService';
+import { Drawer } from './ProductApiTools';
+import { Product, AppSettings, SavedPayload } from '../types';
 import StockPointsPicker from './StockPointsPicker';
 import { mergeIds } from '../utils/endpointUtils';
 
@@ -31,7 +34,19 @@ const StepStockUpdate: React.FC<StepStockUpdateProps> = ({ products, settings, o
     return initial;
   });
 
-  const [payloadContent, setPayloadContent] = useState('');
+  const savedPayloads = savedPayloadsStore.use();
+  const projects = listProjects(savedPayloads);
+  const target = useApiTarget();
+  const targetMissing = missingTargetFields(target);
+  const [incremental, setIncremental] = useState(false);
+  const [importId, setImportId] = useState('');
+  const [saveName, setSaveName] = useState('');
+  const [saveProject, setSaveProject] = useState(getLastProject());
+  const [pushing, setPushing] = useState<string | null>(null);
+  const [pushResults, setPushResults] = useState<StockChunkResult[] | null>(null);
+  const [pushError, setPushError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [isStockPickerOpen, setIsStockPickerOpen] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
 
   const filteredProducts = useMemo(() => {
@@ -119,21 +134,22 @@ const StepStockUpdate: React.FC<StepStockUpdateProps> = ({ products, settings, o
     setNewEndpoint('');
   };
 
-  const generatePayload = () => {
-    const formattedStocks = getStockDataArray();
-    const payload = {
-      token: TOKEN_VAR,
-      site_id: SITE_ID_VAR,
-      import: {
-        incremental: false
-      },
-      stocks: formattedStocks
-    };
+  const buildPayload = (): StockImportPayload => ({
+    site_id: SITE_ID_VAR,
+    token: TOKEN_VAR,
+    import: { incremental, ...(importId.trim() ? { import_id: importId.trim() } : {}) },
+    stocks: getStockDataArray(),
+  });
 
-    const json = JSON.stringify(payload, null, 4);
-    setPayloadContent(json);
+  const generatePayload = () => {
+    setPushResults(null);
+    setPushError(null);
+    setNotice(null);
     setViewMode('payload');
   };
+
+  const payload = viewMode === 'payload' ? buildPayload() : null;
+  const payloadContent = payload ? JSON.stringify(payload, null, 4) : '';
 
   const handleCopy = () => {
     navigator.clipboard.writeText(payloadContent);
@@ -141,65 +157,158 @@ const StepStockUpdate: React.FC<StepStockUpdateProps> = ({ products, settings, o
     setTimeout(() => setCopySuccess(false), 2000);
   };
 
-  const handleDownload = () => {
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(payloadContent);
-    const downloadAnchorNode = document.createElement('a');
-    downloadAnchorNode.setAttribute("href", dataStr);
-    downloadAnchorNode.setAttribute("download", `onestock_stock_payload_${Date.now()}.json`);
-    document.body.appendChild(downloadAnchorNode);
-    downloadAnchorNode.click();
-    downloadAnchorNode.remove();
+  const handleSave = (withResult: boolean) => {
+    if (!payload) return;
+    if (!saveName.trim()) {
+      setNotice('Give the payload a name before saving it.');
+      return;
+    }
+    setLastProject(saveProject.trim());
+    const single = pushResults?.length === 1 ? pushResults[0] : null;
+    savePayload({
+      name: saveName.trim(),
+      project: saveProject.trim() || undefined,
+      source: 'stock',
+      method: 'PATCH',
+      path: '/stock_import',
+      url: withResult ? pushResults?.[0]?.url : undefined,
+      connectionName: target.siteId || undefined,
+      request: payload,
+      response: withResult && pushResults
+        ? (single ? single.response : pushResults.map(r => ({ chunk: r.index + 1, lines: r.lines, status: r.status, body: r.response })))
+        : undefined,
+      status: withResult && pushResults ? (pushResults.every(r => r.ok) ? pushResults[0].status ?? undefined : pushResults.find(r => !r.ok)?.status ?? undefined) : undefined,
+      durationMs: withResult && pushResults ? pushResults.reduce((t, r) => t + (r.durationMs || 0), 0) : undefined,
+    });
+    setNotice(`Saved "${saveName.trim()}" in the payload library${saveProject.trim() ? ` (project ${saveProject.trim()})` : ''}.`);
   };
 
-  if (viewMode === 'payload') {
+  const handleSend = async () => {
+    if (!payload || targetMissing) return;
+    if (isProductionTarget(target) && !window.confirm(`Send ${payload.stocks.length} stock line(s) to ${target.baseUrl} (site ${target.siteId})? This is not a qualification URL.`)) return;
+    setPushing('Sending…');
+    setPushError(null);
+    setNotice(null);
+    setPushResults(null);
+    try {
+      const results = await pushStockImport(payload, (done, total) => setPushing(`Sending request ${done} / ${total}…`));
+      setPushResults(results);
+      const failed = results.filter(r => !r.ok);
+      if (failed.length) setPushError(failed.map(r => `Request ${r.index + 1}: ${r.message}`).join('\n'));
+    } catch (err: any) {
+      setPushError(err?.message || String(err));
+    } finally {
+      setPushing(null);
+    }
+  };
+
+  // Restores quantities (and stock points) from a saved /stock_import payload.
+  const loadSavedStock = (saved: SavedPayload) => {
+    const stocks: StockLine[] = Array.isArray((saved.request as any)?.stocks) ? (saved.request as any).stocks : [];
+    const skus = new Set(products.map(p => p.sku));
+    const matching = stocks.filter(l => skus.has(String(l.item_id)));
+    onEndpointsChange(mergeIds(endpoints, matching.map(l => String(l.endpoint_id))));
+    setStockLevels(prev => {
+      const next = { ...prev };
+      matching.forEach(l => {
+        next[l.item_id] = { ...(next[l.item_id] || {}), [l.endpoint_id]: Number(l.quantity) || 0 };
+      });
+      return next;
+    });
+    if (typeof (saved.request as any)?.import?.incremental === 'boolean') setIncremental((saved.request as any).import.incremental);
+    setSaveName(saved.name);
+    setSaveProject(saved.project || '');
+    setIsStockPickerOpen(false);
+    setNotice(`Loaded "${saved.name}": ${matching.length} line(s) applied${stocks.length - matching.length ? `, ${stocks.length - matching.length} ignored (items not in the current selection)` : ''}.`);
+  };
+
+  const savedStockPayloads = savedPayloads.filter(p => p.path === '/stock_import' && Array.isArray((p.request as any)?.stocks));
+  const savedStockGroups = (() => {
+    const map = new Map<string, SavedPayload[]>();
+    savedStockPayloads.forEach(p => map.set((p.project || '').trim(), [...(map.get((p.project || '').trim()) || []), p]));
+    return [...map.entries()].sort(([x], [y]) => (x === '' ? 1 : y === '' ? -1 : x.localeCompare(y)));
+  })();
+
+  if (viewMode === 'payload' && payload) {
+    const lines = payload.stocks.length;
+    const requests = Math.max(1, Math.ceil(lines / STOCK_IMPORT_MAX_LINES));
     return (
       <div className="space-y-6 animate-in fade-in zoom-in-95 duration-500">
-        <div className="flex items-center justify-between bg-white px-6 py-4 rounded-xl border border-gray-200 shadow-sm">
+        <datalist id="stock-payload-projects">{projects.map(p => <option key={p} value={p} />)}</datalist>
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white px-6 py-4 rounded-xl border border-gray-200 shadow-sm">
           <div>
             <h2 className="text-xl font-bold text-[#002D72]">Stock Payload Generation</h2>
-            <p className="text-sm text-gray-500">Technical body for inventory synchronization across <strong>{endpoints.length}</strong> endpoints.</p>
+            <p className="text-sm text-gray-500">
+              <strong>{lines}</strong> stock line(s) — {products.length} item(s) × <strong>{endpoints.length}</strong> stock point(s)
+              {requests > 1 && <> · sent in <strong>{requests}</strong> requests of max {STOCK_IMPORT_MAX_LINES} lines sharing one import_id</>}.
+            </p>
           </div>
-          <div className="flex gap-3">
-            <button 
-              onClick={() => setViewMode('table')}
-              className="px-4 py-2 text-sm font-semibold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-            >
+          <div className="flex flex-wrap gap-3">
+            <button onClick={() => setViewMode('table')} className="px-4 py-2 text-sm font-semibold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
               Back to Table
             </button>
-            <button 
+            <button
               onClick={handleCopy}
-              className={`px-4 py-2 text-sm font-bold border rounded-lg transition-all flex items-center gap-2 ${
-                copySuccess ? 'bg-green-50 border-green-200 text-green-600' : 'bg-white border-onestock-blue text-onestock-blue hover:bg-blue-50'
-              }`}
+              className={`px-4 py-2 text-sm font-bold border rounded-lg transition-all ${copySuccess ? 'bg-green-50 border-green-200 text-green-600' : 'bg-white border-onestock-blue text-onestock-blue hover:bg-blue-50'}`}
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>
               {copySuccess ? 'Copied!' : 'Copy to Clipboard'}
             </button>
-            <button 
-              onClick={handleDownload}
-              className="px-6 py-2 text-sm font-bold text-white bg-[#002D72] rounded-lg hover:bg-[#001F4D] shadow-lg transition-all flex items-center gap-2"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+            <button onClick={() => downloadJson(payload, `onestock_stock_payload_${Date.now()}`)} className="px-4 py-2 text-sm font-bold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
               Download .json
             </button>
           </div>
         </div>
 
-        <div className="bg-[#001F4D] rounded-2xl shadow-2xl p-6 border border-white/10 relative overflow-hidden group">
-          <div className="absolute top-4 right-4 text-white/20 font-mono text-xs uppercase tracking-widest font-bold">STOCK PAYLOAD STRUCTURE</div>
-          <div className="max-h-[60vh] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent pr-4">
-            <pre className="text-blue-100 font-mono text-sm leading-relaxed whitespace-pre-wrap">
-              {payloadContent}
-            </pre>
+        <div className="bg-white px-6 py-5 rounded-xl border border-gray-200 shadow-sm space-y-4">
+          <div className="flex flex-wrap items-end gap-4">
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input type="checkbox" checked={incremental} onChange={e => setIncremental(e.target.checked)} />
+              <span><strong>incremental</strong> — add to existing stock instead of replacing it</span>
+            </label>
+            <div>
+              <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">import_id (optional)</label>
+              <input value={importId} onChange={e => setImportId(e.target.value)} placeholder={requests > 1 ? 'generated automatically' : 'none'} className="w-56 px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg outline-none" />
+            </div>
           </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <input value={saveProject} onChange={e => setSaveProject(e.target.value)} list="stock-payload-projects" placeholder="Project" className="w-40 px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg outline-none" />
+            <input value={saveName} onChange={e => setSaveName(e.target.value)} placeholder="Payload name (required to save)" className="flex-1 min-w-[200px] px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg outline-none" />
+            <button onClick={() => handleSave(false)} disabled={!saveName.trim()} className="px-3 py-2 text-xs font-bold text-onestock-blue border border-onestock-blue rounded-lg hover:bg-blue-50 disabled:opacity-40">Save payload</button>
+            <button
+              onClick={handleSend}
+              disabled={!!pushing || !!targetMissing || lines === 0}
+              className="px-5 py-2 text-xs font-bold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-40"
+            >
+              {pushing || 'PATCH /stock_import'}
+            </button>
+          </div>
+          <p className="text-[11px] text-gray-500">
+            {targetMissing ? <span className="text-red-600">Missing in API Settings: {targetMissing}</span> : <>Target: <strong>{target.siteId}</strong> · {target.baseUrl}</>}
+          </p>
+          {notice && <p className="text-sm text-blue-900 bg-blue-50 border border-blue-100 rounded-lg p-3">{notice}</p>}
+          {pushError && <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3 whitespace-pre-line break-words">{pushError}</p>}
+          {pushResults && (
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {pushResults.map(r => (
+                  <span key={r.index} title={r.message} className={`text-xs font-bold px-2 py-1 rounded ${r.ok ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                    {pushResults.length > 1 ? `#${r.index + 1} · ` : ''}{r.status ?? 'ERR'} · {r.lines} line(s){r.durationMs !== undefined ? ` · ${r.durationMs} ms` : ''}
+                  </span>
+                ))}
+                <button onClick={() => handleSave(true)} disabled={!saveName.trim()} className="ml-auto px-3 py-1.5 text-xs font-bold text-onestock-blue border border-onestock-blue rounded-lg hover:bg-blue-50 disabled:opacity-40">Save payload + result</button>
+              </div>
+              <pre className="max-h-[25vh] overflow-auto bg-gray-900 text-gray-100 font-mono text-[11px] p-4 rounded-lg whitespace-pre-wrap break-all">
+                {JSON.stringify(pushResults.length === 1 ? pushResults[0].response ?? null : pushResults.map(r => ({ request: r.index + 1, status: r.status, body: r.response })), null, 2)}
+              </pre>
+            </div>
+          )}
         </div>
 
-        <div className="p-4 bg-blue-50/50 rounded-xl border border-blue-100 flex items-start gap-3">
-          <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-onestock-blue shrink-0">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-          </div>
-          <div className="text-xs text-blue-900/70 leading-relaxed">
-            <strong>Integration Tip:</strong> This payload follows the standard OneStock stock import format. Ensure your <code>endpoint_id</code> values match your project's configuration.
+        <div className="bg-[#001F4D] rounded-2xl shadow-2xl p-6 border border-white/10 relative overflow-hidden">
+          <div className="absolute top-4 right-4 text-white/20 font-mono text-xs uppercase tracking-widest font-bold">STOCK PAYLOAD STRUCTURE</div>
+          <div className="max-h-[50vh] overflow-y-auto pr-4">
+            <pre className="text-blue-100 font-mono text-sm leading-relaxed whitespace-pre-wrap">{payloadContent}</pre>
           </div>
         </div>
       </div>
@@ -228,6 +337,8 @@ const StepStockUpdate: React.FC<StepStockUpdateProps> = ({ products, settings, o
             />
           </div>
 
+          <button onClick={() => setIsStockPickerOpen(true)} className="px-3 py-2 text-xs font-bold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-all">Load saved stock payload</button>
+
           <button onClick={fillRandom} className="px-3 py-2 text-xs font-bold text-onestock-blue border border-onestock-blue rounded-lg hover:bg-blue-50 transition-all">Randomize (50% zeroes)</button>
           
           <button 
@@ -238,6 +349,43 @@ const StepStockUpdate: React.FC<StepStockUpdateProps> = ({ products, settings, o
           </button>
         </div>
       </div>
+
+      {isStockPickerOpen && (
+        <Drawer title="Load saved stock payload" onClose={() => setIsStockPickerOpen(false)} wide>
+          <div className="space-y-4">
+            <p className="text-sm text-gray-500">
+              Saved <code>/stock_import</code> payloads, grouped by project. Quantities are applied to the items of the current selection
+              and their stock points are added to the list.
+            </p>
+            {savedStockGroups.length === 0 ? (
+              <p className="p-10 text-center text-sm text-gray-400 border border-dashed border-gray-200 rounded-xl">No saved stock payload yet.</p>
+            ) : savedStockGroups.map(([group, entries]) => (
+              <div key={group || '__none__'} className="border border-gray-200 rounded-xl overflow-hidden">
+                <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center gap-2">
+                  <span className="text-xs font-bold text-[#002D72] uppercase tracking-widest">{group || 'No project'}</span>
+                  <span className="text-[11px] text-gray-400">{entries.length} payload(s)</span>
+                </div>
+                <ul className="divide-y divide-gray-100">
+                  {entries.map(sp => (
+                    <li key={sp.id} className="p-4 flex flex-wrap items-center gap-2">
+                      <div className="min-w-0 flex-1">
+                        <span className="font-bold text-sm text-gray-900">{sp.name}</span>
+                        <p className="text-[11px] text-gray-400 mt-0.5">
+                          {(sp.request as any).stocks.length} line(s) · {SOURCE_LABELS[sp.source] || sp.source}
+                          {sp.status !== undefined && ` · sent, HTTP ${sp.status}`} · {new Date(sp.createdAt).toLocaleString()}
+                        </p>
+                      </div>
+                      <button onClick={() => loadSavedStock(sp)} className="px-3 py-1.5 text-xs font-bold text-white bg-onestock-blue rounded-lg hover:bg-[#001F4D]">Load</button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </Drawer>
+      )}
+
+      {notice && viewMode === 'table' && <p className="text-sm text-blue-900 bg-blue-50 border border-blue-100 rounded-lg p-3">{notice}</p>}
 
       {isPickerOpen && (
         <StockPointsPicker hasEndpoints={endpoints.length > 0} onLoad={handleLoadEndpoints} onClose={() => setIsPickerOpen(false)} />

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { SavedPayload, OnestockApiVersion } from '../types';
-import { savedPayloadsStore, listProjects, updateSavedPayload } from '../services/payloadStore';
+import { savedPayloadsStore, listProjects, updateSavedPayload, SOURCE_LABELS } from '../services/payloadStore';
 import { stockPointSetsStore } from '../services/appStores';
 import { onestockRequest, useApiTarget, missingTargetFields, describeCallError, getApiTarget } from '../services/onestockClient';
 import { extractEndpointIds, mergeIds } from '../utils/endpointUtils';
@@ -78,7 +78,7 @@ const StockPointsPicker: React.FC<StockPointsPickerProps> = ({ hasEndpoints, onL
           groupOf(p.project).sources.push({
             key: `payload-${p.id}`,
             name: p.name,
-            detail: `${p.method} ${p.path} · ${fromResult ? 'result' : 'request'} · ${p.source === 'explorer' ? 'API Explorer' : 'Product Manager'}`,
+            detail: `${p.method} ${p.path} · ${fromResult ? 'result' : 'request'} · ${SOURCE_LABELS[p.source] || p.source}`,
             createdAt: p.createdAt,
             ids,
           });
