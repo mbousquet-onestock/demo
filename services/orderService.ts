@@ -224,34 +224,44 @@ export interface OrderIds {
   startIndex: number;
 }
 
-// Moves the ids past those already used (saved batches), so a new batch never reuses a parent order or sub-order
-// id that may already exist in OneStock (OneStock would attach the new sub-orders to the old parent order).
-export const nextFreeIds = (ids: OrderIds, usedParents: Set<string>, usedOrders: Set<string>): { ids: OrderIds; moved: boolean } => {
+// A new batch never reuses a parent order or sub-order id of a saved batch (it may already exist in OneStock, which
+// would attach the new sub-orders to the old parent order). The ids typed by the user are kept when they are free;
+// they move past the saved batches only when one of the ids to generate (orderCount parents, up to maxOrders
+// sub-orders) is already used.
+export const nextFreeIds = (
+  ids: OrderIds, usedParents: Set<string>, usedOrders: Set<string>, orderCount: number, maxOrders: number
+): { ids: OrderIds; moved: boolean } => {
   let { parentOrderId, startIndex } = ids;
-  const parentMatch = parentOrderId.match(/^(.*?)(\d+)$/);
-  if (parentMatch) {
-    const [, prefix, digits] = parentMatch;
-    let max = -1n;
-    usedParents.forEach(id => {
-      const m = id.match(/^(.*?)(\d+)$/);
-      if (m && m[1] === prefix) {
-        const n = BigInt(m[2]);
-        if (n > max) max = n;
-      }
-    });
-    if (max >= BigInt(digits)) parentOrderId = `${prefix}${(max + 1n).toString().padStart(digits.length, '0')}`;
-  } else if (usedParents.has(parentOrderId)) {
-    parentOrderId = incrementId(parentOrderId);
+  const prefixes = ORDER_STRATEGIES.map(s => ids.orderIdPrefix.replace(/\{TYPE\}/gi, s.toUpperCase()));
+  const orderId = (p: string, n: number) => `${p}${String(n).padStart(3, '0')}`;
+
+  const parentsTaken = Array.from({ length: Math.max(orderCount, 1) }, (_, k) => incrementId(parentOrderId, k)).some(id => usedParents.has(id));
+  if (parentsTaken) {
+    const parentMatch = parentOrderId.match(/^(.*?)(\d+)$/);
+    if (parentMatch) {
+      const [, prefix, digits] = parentMatch;
+      let max = BigInt(digits) - 1n;
+      usedParents.forEach(id => {
+        const m = id.match(/^(.*?)(\d+)$/);
+        if (m && m[1] === prefix && BigInt(m[2]) > max) max = BigInt(m[2]);
+      });
+      parentOrderId = `${prefix}${(max + 1n).toString().padStart(digits.length, '0')}`;
+    } else {
+      while (usedParents.has(parentOrderId)) parentOrderId = incrementId(parentOrderId);
+    }
   }
 
-  const prefixes = ORDER_STRATEGIES.map(s => ids.orderIdPrefix.replace(/\{TYPE\}/gi, s.toUpperCase()));
-  let maxSub = -1;
-  usedOrders.forEach(id => {
-    prefixes.forEach(p => {
-      if (id.startsWith(p) && /^\d+$/.test(id.slice(p.length))) maxSub = Math.max(maxSub, parseInt(id.slice(p.length), 10));
+  const ordersTaken = Array.from({ length: Math.max(maxOrders, 1) }, (_, k) => startIndex + k)
+    .some(n => prefixes.some(p => usedOrders.has(orderId(p, n))));
+  if (ordersTaken) {
+    let maxSub = startIndex - 1;
+    usedOrders.forEach(id => {
+      prefixes.forEach(p => {
+        if (id.startsWith(p) && /^\d+$/.test(id.slice(p.length))) maxSub = Math.max(maxSub, parseInt(id.slice(p.length), 10));
+      });
     });
-  });
-  if (maxSub >= startIndex) startIndex = maxSub + 1;
+    startIndex = maxSub + 1;
+  }
 
   const moved = parentOrderId !== ids.parentOrderId || startIndex !== ids.startIndex;
   return { ids: { ...ids, parentOrderId, startIndex }, moved };

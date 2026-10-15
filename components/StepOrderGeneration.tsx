@@ -150,6 +150,18 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
   const selectedCountries = settings.deliveryCountries.filter(c => config.countryCodes.includes(c.code));
   const channel = channels.find(c => c.id === config.salesChannel);
   const currency = channel?.currency || selectedCountries[0]?.currency || products.find(p => p.currency)?.currency || 'EUR';
+  // Ids of the saved batches (and of the batch on screen): the ids typed above move past them only on a collision.
+  const usedIds = useMemo(() => {
+    const parents = new Set<string>();
+    const orders = new Set<string>();
+    [...batches.map(b => b.packages), ...(batch ? [batch.packages] : [])].flat().forEach(p => {
+      parents.add(p.parent.parent_order.id);
+      p.subOrders.forEach(o => orders.add(o.order.id));
+    });
+    return { parents, orders };
+  }, [batches, batch]);
+  const idCheck = nextFreeIds(ids, usedIds.parents, usedIds.orders, config.orderCount, config.orderCount * config.subOrdersMax);
+
   const missingPrices = useMemo(() => products.filter(p => !hasPrice(p)).length, [products]);
   const needsPoints = config.strategies.some(s => s !== 'sfs');
 
@@ -219,14 +231,8 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
       }
 
       // Never reuse an id of a saved batch (it may already exist in OneStock).
-      const usedParents = new Set<string>();
-      const usedOrders = new Set<string>();
-      [...batches.map(b => b.packages), ...(batch ? [batch.packages] : [])].flat().forEach(p => {
-        usedParents.add(p.parent.parent_order.id);
-        p.subOrders.forEach(o => usedOrders.add(o.order.id));
-      });
-      const free = nextFreeIds(ids, usedParents, usedOrders);
-      if (free.moved) warnings.push(`Ids moved to ${free.ids.parentOrderId} / ${free.ids.startIndex} to skip ids already used by saved batches.`);
+      const free = idCheck;
+      if (free.moved) warnings.push(`Ids ${ids.parentOrderId} / ${ids.startIndex} are already used by a saved batch: moved to ${free.ids.parentOrderId} / ${free.ids.startIndex}.`);
 
       const result = generateOrderPackages({ ...fullConfig, ...free.ids }, products, customers, prices);
       const now = new Date().toISOString();
@@ -537,6 +543,16 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
               <p className="text-[10px] text-gray-400">{'{TYPE}'} → SFS / CKC / ROPIS</p>
               <p className="text-[10px] text-gray-400">Continues after each batch · next: <span className="font-mono">{previewId}</span></p>
             </div>
+            {idCheck.moved && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 flex flex-wrap items-center gap-2">
+                <span className="flex-1 min-w-[200px]">
+                  Some of these ids are already used by a saved batch: the generation will use
+                  <span className="font-mono font-bold"> {idCheck.ids.parentOrderId}</span> / sub-order number <span className="font-mono font-bold">{idCheck.ids.startIndex}</span>.
+                  Change the prefix or the numbers to use your own free ids.
+                </span>
+                <button onClick={() => setIds(idCheck.ids)} className="px-3 py-1.5 text-xs font-bold text-amber-800 border border-amber-300 rounded-lg hover:bg-amber-100">Use these ids</button>
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 p-4 bg-gray-50 rounded-xl border border-gray-100 items-center">
               <div>
                 <p className="text-xs font-bold text-gray-700">ChatGPT</p>
