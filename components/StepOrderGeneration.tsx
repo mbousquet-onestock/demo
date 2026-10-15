@@ -3,7 +3,7 @@ import JSZip from 'jszip';
 import { Product, AppSettings, OrderBatch } from '../types';
 import {
   generateOrderPackages, generateOrderCustomers, priceMissingArticles, validateConfig, incrementId, hasPrice,
-  OrderGenerationConfig, OrderPackage, OrderStrategy, ORDER_STRATEGIES,
+  OrderGenerationConfig, OrderPackage, OrderStrategy, ORDER_STRATEGIES, OrderIds, nextFreeIds,
 } from '../services/orderService';
 import { fetchSalesChannels } from '../services/salesChannelService';
 import { getAiStatus, AiStatus } from '../services/aiService';
@@ -143,6 +143,10 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
   // First visit: load the sales channels from OneStock.
   useEffect(() => { if (channels.length === 0) loadChannels(); }, []);
 
+  // Order ids are kept in the settings (database), shared by every browser.
+  const ids: OrderIds = settings.orderIds || { parentOrderId: config.parentOrderId, orderIdPrefix: config.orderIdPrefix, startIndex: config.startIndex };
+  const setIds = (patch: Partial<OrderIds>) => onUpdateSettings({ orderIds: { ...ids, ...patch } });
+
   const selectedCountries = settings.deliveryCountries.filter(c => config.countryCodes.includes(c.code));
   const channel = channels.find(c => c.id === config.salesChannel);
   const currency = channel?.currency || selectedCountries[0]?.currency || products.find(p => p.currency)?.currency || 'EUR';
@@ -151,6 +155,7 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
 
   const fullConfig: OrderGenerationConfig = {
     ...config,
+    ...ids,
     countries: selectedCountries,
     currency,
     salesChannels: channels.map(c => c.id),
@@ -213,7 +218,17 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
         }
       }
 
-      const result = generateOrderPackages(fullConfig, products, customers, prices);
+      // Never reuse an id of a saved batch (it may already exist in OneStock).
+      const usedParents = new Set<string>();
+      const usedOrders = new Set<string>();
+      [...batches.map(b => b.packages), ...(batch ? [batch.packages] : [])].flat().forEach(p => {
+        usedParents.add(p.parent.parent_order.id);
+        p.subOrders.forEach(o => usedOrders.add(o.order.id));
+      });
+      const free = nextFreeIds(ids, usedParents, usedOrders);
+      if (free.moved) warnings.push(`Ids moved to ${free.ids.parentOrderId} / ${free.ids.startIndex} to skip ids already used by saved batches.`);
+
+      const result = generateOrderPackages({ ...fullConfig, ...free.ids }, products, customers, prices);
       const now = new Date().toISOString();
       setBatch({
         id: Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
@@ -228,7 +243,7 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
       setOpenPackage(0);
       const subCount = result.reduce((n, p) => n + p.subOrders.length, 0);
       // Next batch continues the numbering.
-      set({ parentOrderId: incrementId(config.parentOrderId, config.orderCount), startIndex: config.startIndex + subCount });
+      setIds({ parentOrderId: incrementId(free.ids.parentOrderId, config.orderCount), startIndex: free.ids.startIndex + subCount });
       if (!useAi && (aiCustomers || (aiPrices && missingPrices > 0))) warnings.push('No OpenAI key (API Settings): sample identities / random prices used.');
       setWarning(warnings.length ? warnings.join(' ') : null);
     } catch (err: any) {
@@ -370,7 +385,7 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
   };
 
   const totalSubOrders = packages?.reduce((n, p) => n + p.subOrders.length, 0) || 0;
-  const previewId = `${config.orderIdPrefix.replace(/\{TYPE\}/gi, (config.strategies[0] || 'sfs').toUpperCase())}${String(config.startIndex).padStart(3, '0')}`;
+  const previewId = `${ids.orderIdPrefix.replace(/\{TYPE\}/gi, (config.strategies[0] || 'sfs').toUpperCase())}${String(ids.startIndex).padStart(3, '0')}`;
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500 pb-20">
@@ -513,12 +528,12 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
               <label className={labelTight}>First parent order id</label>
               <label className={labelTight + ' hidden sm:block'}>Sub-order id prefix</label>
               <label className={labelTight + ' hidden sm:block'}>Next sub-order number</label>
-              <input value={config.parentOrderId} onChange={e => set({ parentOrderId: e.target.value })} className={inputClass + ' font-mono'} />
+              <input value={ids.parentOrderId} onChange={e => setIds({ parentOrderId: e.target.value.trim() })} className={inputClass + ' font-mono'} />
               <label className={labelTight + ' mt-3 sm:hidden'}>Sub-order id prefix</label>
-              <input value={config.orderIdPrefix} onChange={e => set({ orderIdPrefix: e.target.value })} className={inputClass + ' font-mono'} />
+              <input value={ids.orderIdPrefix} onChange={e => setIds({ orderIdPrefix: e.target.value })} className={inputClass + ' font-mono'} />
               <label className={labelTight + ' mt-3 sm:hidden'}>Next sub-order number</label>
-              <input type="number" min={0} value={config.startIndex} onChange={e => set({ startIndex: parseInt(e.target.value) || 0 })} className={inputClass + ' font-mono'} />
-              <p className="text-[10px] text-gray-400">Incremented for each order</p>
+              <input type="number" min={0} value={ids.startIndex} onChange={e => setIds({ startIndex: parseInt(e.target.value) || 0 })} className={inputClass + ' font-mono'} />
+              <p className="text-[10px] text-gray-400">Shared by all browsers · ids of saved batches are skipped</p>
               <p className="text-[10px] text-gray-400">{'{TYPE}'} → SFS / CKC / ROPIS</p>
               <p className="text-[10px] text-gray-400">Continues after each batch · next: <span className="font-mono">{previewId}</span></p>
             </div>
@@ -557,7 +572,7 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
               ['Currency', config.salesChannel ? currency : 'per channel / country'],
               ...(needsPoints ? [['Collection points', `${deliveryPoints.length}`]] : []),
               ['Customers', aiAvailable && aiCustomers ? 'ChatGPT' : 'sample data'],
-              ['Parent ids', config.orderCount > 1 ? `${config.parentOrderId} → …${incrementId(config.parentOrderId, config.orderCount - 1).slice(-4)}` : config.parentOrderId],
+              ['Parent ids', config.orderCount > 1 ? `${ids.parentOrderId} → …${incrementId(ids.parentOrderId, config.orderCount - 1).slice(-4)}` : ids.parentOrderId],
               ['First sub-order', previewId],
             ].map(([k, v]) => (
               <div key={k} className="flex justify-between gap-3">

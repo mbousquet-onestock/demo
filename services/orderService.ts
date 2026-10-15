@@ -218,6 +218,45 @@ export const incrementId = (id: string, by = 1): string => {
   return `${match[1]}${next}`;
 };
 
+export interface OrderIds {
+  parentOrderId: string;
+  orderIdPrefix: string;
+  startIndex: number;
+}
+
+// Moves the ids past those already used (saved batches), so a new batch never reuses a parent order or sub-order
+// id that may already exist in OneStock (OneStock would attach the new sub-orders to the old parent order).
+export const nextFreeIds = (ids: OrderIds, usedParents: Set<string>, usedOrders: Set<string>): { ids: OrderIds; moved: boolean } => {
+  let { parentOrderId, startIndex } = ids;
+  const parentMatch = parentOrderId.match(/^(.*?)(\d+)$/);
+  if (parentMatch) {
+    const [, prefix, digits] = parentMatch;
+    let max = -1n;
+    usedParents.forEach(id => {
+      const m = id.match(/^(.*?)(\d+)$/);
+      if (m && m[1] === prefix) {
+        const n = BigInt(m[2]);
+        if (n > max) max = n;
+      }
+    });
+    if (max >= BigInt(digits)) parentOrderId = `${prefix}${(max + 1n).toString().padStart(digits.length, '0')}`;
+  } else if (usedParents.has(parentOrderId)) {
+    parentOrderId = incrementId(parentOrderId);
+  }
+
+  const prefixes = ORDER_STRATEGIES.map(s => ids.orderIdPrefix.replace(/\{TYPE\}/gi, s.toUpperCase()));
+  let maxSub = -1;
+  usedOrders.forEach(id => {
+    prefixes.forEach(p => {
+      if (id.startsWith(p) && /^\d+$/.test(id.slice(p.length))) maxSub = Math.max(maxSub, parseInt(id.slice(p.length), 10));
+    });
+  });
+  if (maxSub >= startIndex) startIndex = maxSub + 1;
+
+  const moved = parentOrderId !== ids.parentOrderId || startIndex !== ids.startIndex;
+  return { ids: { ...ids, parentOrderId, startIndex }, moved };
+};
+
 const STRATEGY_SETTINGS: Record<OrderStrategy, { types: string[]; deliveryMethod: string; shipping: number }> = {
   sfs: { types: ['ffs'], deliveryMethod: 'standard_hd', shipping: 10 },
   ckc: { types: ['ffs', 'ckc'], deliveryMethod: 'standard_ckc', shipping: 0 },

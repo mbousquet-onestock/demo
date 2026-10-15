@@ -140,6 +140,8 @@ export interface AppSettings {
   salesChannelsCache?: { id: string; name?: string; description?: string; currency?: string }[];
   // Collection points used for CKC / ROPIS generated orders.
   orderDeliveryPoints?: string[];
+  // Next order ids of the Order Generator, shared by every browser (avoids re-using ids already sent to OneStock).
+  orderIds?: { parentOrderId: string; orderIdPrefix: string; startIndex: number };
   rulesets: string[];
   defaultWeight: number;
   defaultHeight: number;

@@ -12,7 +12,12 @@ const toResult = (ok: boolean, status: number | null, message: string, requestId
 const send = async (path: string, body: Record<string, unknown>, version: OnestockApiVersion): Promise<OrderPushResult> => {
   try {
     const { envelope } = await onestockRequest({ method: 'POST', path, body, version });
-    return toResult(envelope.ok, envelope.status, envelope.ok ? 'Created' : describeCallError(envelope), envelope.headers?.['request-id']);
+    let message = envelope.ok ? 'Created' : describeCallError(envelope);
+    // The parent order id already exists in OneStock with orders of another customer (earlier batch).
+    if (!envelope.ok && /different customer, address or currency than sibling/i.test(message)) {
+      message += ' → this parent order id is already used in OneStock by an earlier batch: generate the orders again with new ids.';
+    }
+    return toResult(envelope.ok, envelope.status, message, envelope.headers?.['request-id']);
   } catch (err: any) {
     return toResult(false, null, err?.message || String(err));
   }
