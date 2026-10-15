@@ -27,7 +27,7 @@ const DatabaseSync: React.FC = () => {
         <div>
           <h3 className="text-sm font-bold text-[#002D72] uppercase tracking-widest border-l-4 border-[#002D72] pl-3">Database (Vercel Postgres)</h3>
           <p className="text-gray-500 text-sm mt-2 max-w-2xl">
-            Import history, products, settings (the token is encrypted server-side) and saved payloads
+            Settings (the token is encrypted server-side), saved payloads, stock points, order batches and manual steps
             are stored in the project database through <code className="text-xs bg-gray-100 px-1 rounded">/api/data</code>.
             Every browser using the same access key shares the same data; this browser keeps a local copy as cache.
           </p>

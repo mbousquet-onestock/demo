@@ -57,7 +57,7 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
 
 ## Database (Vercel Postgres / Neon)
 
-Import history, settings (token included), saved payloads, stock point sets, order batches and manual steps are stored in
+Settings (token included), saved payloads, stock point sets, order batches and manual steps are stored in
 Postgres through the `api/data.ts` function (one `app_documents` table, created automatically). Each browser keeps a
 localStorage copy as cache; the first sync of a browser uploads its local data, afterwards the database wins.
 

@@ -33,12 +33,7 @@ export interface GroundingSource {
 }
 
 export enum AppStep {
-  HISTORY = 'HISTORY',
-  INPUT = 'INPUT',
-  SCANNING = 'SCANNING',
   RESULTS = 'RESULTS',
-  IMPORTING = 'IMPORTING',
-  SUCCESS = 'SUCCESS',
   SETTINGS = 'SETTINGS',
   STOCK_UPDATE = 'STOCK_UPDATE',
   JSON_VIEWER = 'JSON_VIEWER',
@@ -48,15 +43,6 @@ export enum AppStep {
   STOCK_POINTS = 'STOCK_POINTS',
   MANUAL_STEPS = 'MANUAL_STEPS',
   PROJECTS = 'PROJECTS'
-}
-
-export interface ProcessedSite {
-  id: string;
-  url: string;
-  hostname: string;
-  date: string;
-  products: Product[];
-  sources?: GroundingSource[];
 }
 
 export interface Endpoint {

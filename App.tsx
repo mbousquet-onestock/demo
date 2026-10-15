@@ -1,14 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
-import { AppStep, Product, ProcessedSite, GroundingSource } from './types';
+import { AppStep, Product } from './types';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
-import StepInput from './components/StepInput';
-import StepScanning from './components/StepScanning';
 import StepResults from './components/StepResults';
-import StepImporting from './components/StepImporting';
-import StepSuccess from './components/StepSuccess';
-import StepHistory from './components/StepHistory';
 import Settings from './components/Settings';
 import StepStockUpdate from './components/StepStockUpdate';
 import StepJsonViewer from './components/StepJsonViewer';
@@ -18,49 +13,30 @@ import StepApiLog from './components/StepApiLog';
 import StepStockPoints from './components/StepStockPoints';
 import StepManualSteps from './components/StepManualSteps';
 import StepProjects from './components/StepProjects';
-import { historyStore, settingsStore } from './services/appStores';
+import { settingsStore } from './services/appStores';
 import { initDbSync, migrateLegacyLocalConnections } from './services/dbSync';
 import { onestockItemsToProducts } from './utils/payloadUtils';
 import { setLastProject } from './services/payloadStore';
 
 const App: React.FC = () => {
-  const [currentStep, setCurrentStep] = useState<AppStep>(AppStep.HISTORY);
+  const [currentStep, setCurrentStep] = useState<AppStep>(AppStep.PROJECTS);
   const [targetUrl, setTargetUrl] = useState('');
-  const [targetLimit, setTargetLimit] = useState(10);
   const [products, setProducts] = useState<Product[]>([]);
-  const [groundingSources, setGroundingSources] = useState<GroundingSource[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectedProductsForJson, setSelectedProductsForJson] = useState<Product[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [isViewingHistory, setIsViewingHistory] = useState(false);
   // Saved payload / project the Product Manager list was loaded from.
   const [productSource, setProductSource] = useState<{ label: string; project?: string } | null>(null);
-  // History and settings live in stores cached in localStorage and synced to the Vercel database.
-  const history = historyStore.use();
-  const setHistory = historyStore.set;
+  // Settings live in a store cached in localStorage and synced to the Vercel database.
   const settings = settingsStore.use();
   const setSettings = settingsStore.set;
 
   useEffect(() => {
     migrateLegacyLocalConnections();
+    // Local cache of the removed Import History (the database copy is left untouched).
+    try { localStorage.removeItem('onestock_import_history'); } catch { /* ignore */ }
     initDbSync();
   }, []);
-
-  const handleStartScan = (url: string, limit: number) => {
-    setTargetUrl(url);
-    setTargetLimit(limit);
-    setIsViewingHistory(false);
-    setError(null);
-    setCurrentStep(AppStep.SCANNING);
-  };
-
-  const handleScanComplete = (results: Product[], sources: GroundingSource[]) => {
-    setProductSource(null);
-    setProducts(results);
-    setGroundingSources(sources);
-    setSelectedIds(new Set(results.map(p => p.id)));
-    setCurrentStep(AppStep.RESULTS);
-  };
 
   const handleUpdateProduct = (updatedProduct: Product) => {
     setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
@@ -97,31 +73,12 @@ const App: React.FC = () => {
       setProducts(loaded);
       setSelectedIds(new Set(loaded.map(p => p.id)));
       setTargetUrl('');
-      setGroundingSources([]);
     } else {
       setProducts(prev => [...loaded, ...prev]);
       setSelectedIds(prev => new Set([...prev, ...loaded.map(p => p.id)]));
     }
-    setIsViewingHistory(false);
     setError(null);
     setCurrentStep(AppStep.RESULTS);
-  };
-
-  const handleStartImport = () => {
-    setCurrentStep(AppStep.IMPORTING);
-  };
-
-  const handleImportComplete = () => {
-    const newSite: ProcessedSite = {
-      id: Date.now().toString(),
-      url: targetUrl,
-      hostname: new URL(targetUrl).hostname,
-      date: new Date().toLocaleString(),
-      products: products,
-      sources: groundingSources
-    };
-    setHistory(prev => [newSite, ...prev]);
-    setCurrentStep(AppStep.SUCCESS);
   };
 
   const handleGenerateJson = (selected: Product[]) => {
@@ -129,46 +86,13 @@ const App: React.FC = () => {
     setCurrentStep(AppStep.JSON_VIEWER);
   };
 
-  const handleImportJson = (site: ProcessedSite) => {
-    if (site && site.id && site.products && Array.isArray(site.products)) {
-      setHistory(prev => {
-        if (prev.some(item => item.id === site.id)) return prev;
-        return [site, ...prev];
-      });
-    } else {
-      console.error('Invalid JSON format.');
-    }
-  };
-
-  const handleViewHistoryItem = (site: ProcessedSite) => {
-    setProductSource(null);
-    setTargetUrl(site.url);
-    setProducts(site.products);
-    setGroundingSources(site.sources || []);
-    setSelectedIds(new Set(site.products.map(p => p.id)));
-    setIsViewingHistory(true);
-    setCurrentStep(AppStep.RESULTS);
-  };
-
   const reset = () => {
     setProductSource(null);
     setTargetUrl('');
     setProducts([]);
-    setGroundingSources([]);
     setSelectedIds(new Set());
-    setIsViewingHistory(false);
-    setCurrentStep(AppStep.HISTORY);
+    setCurrentStep(AppStep.PROJECTS);
     setError(null);
-  };
-
-  const goToInput = () => {
-    setProductSource(null);
-    setTargetUrl('');
-    setProducts([]);
-    setGroundingSources([]);
-    setSelectedIds(new Set());
-    setIsViewingHistory(false);
-    setCurrentStep(AppStep.INPUT);
   };
 
   // Only pass items that are currently selected in Step 2 to sub-tools
@@ -179,8 +103,6 @@ const App: React.FC = () => {
       <Sidebar 
         currentStep={currentStep} 
         onReset={reset} 
-        onGoToHistory={() => setCurrentStep(AppStep.HISTORY)}
-        onNewImport={goToInput}
         onGoToSettings={() => setCurrentStep(AppStep.SETTINGS)}
         onGoToStock={() => setCurrentStep(AppStep.STOCK_UPDATE)}
         onGoToOrders={() => setCurrentStep(AppStep.ORDER_GENERATION)}
@@ -225,40 +147,15 @@ const App: React.FC = () => {
               />
             )}
 
-            {currentStep === AppStep.HISTORY && (
-              <StepHistory 
-                history={history} 
-                onViewItem={handleViewHistoryItem} 
-                onNewImport={goToInput}
-                settings={settings}
-                onImportJson={handleImportJson}
-              />
-            )}
-
-            {currentStep === AppStep.INPUT && (
-              <StepInput onStart={handleStartScan} />
-            )}
-            
-            {currentStep === AppStep.SCANNING && (
-              <StepScanning 
-                url={targetUrl} 
-                limit={targetLimit}
-                onComplete={handleScanComplete} 
-                onError={(msg) => { setError(msg); setCurrentStep(AppStep.INPUT); }} 
-              />
-            )}
-            
             {currentStep === AppStep.RESULTS && (
               <StepResults 
                 products={products} 
                 url={targetUrl} 
                 settings={settings}
-                sources={groundingSources}
                 selectedIds={selectedIds}
                 onSelectionChange={setSelectedIds}
                 onCancel={reset}
                 onGenerateJson={handleGenerateJson}
-                isHistoryView={isViewingHistory}
                 onUpdateProduct={handleUpdateProduct}
                 onAddProduct={handleAddProduct}
                 onDeleteProduct={handleDeleteProduct}
@@ -273,18 +170,6 @@ const App: React.FC = () => {
                 settings={settings}
                 onBack={() => setCurrentStep(AppStep.RESULTS)}
               />
-            )}
-            
-            {currentStep === AppStep.IMPORTING && (
-              <StepImporting 
-                products={selectedProducts} 
-                url={targetUrl} 
-                onComplete={handleImportComplete} 
-              />
-            )}
-            
-            {currentStep === AppStep.SUCCESS && (
-              <StepSuccess onReset={() => setCurrentStep(AppStep.HISTORY)} url={targetUrl} />
             )}
             
             {error && (

@@ -8,8 +8,6 @@ import { DB_STATUS_LABELS } from './DatabaseSync';
 interface SidebarProps {
   currentStep: AppStep;
   onReset: () => void;
-  onGoToHistory: () => void;
-  onNewImport: () => void;
   onGoToSettings: () => void;
   onGoToStock: () => void;
   onGoToOrders: () => void;
@@ -20,8 +18,6 @@ interface SidebarProps {
 const Sidebar: React.FC<SidebarProps> = ({ 
   currentStep, 
   onReset, 
-  onGoToHistory, 
-  onNewImport, 
   onGoToSettings, 
   onGoToStock,
   onGoToOrders,
@@ -33,8 +29,6 @@ const Sidebar: React.FC<SidebarProps> = ({
   const dbStatus = dbStatusStore.use();
   const steps = [
     { id: AppStep.PROJECTS, label: 'Projects', icon: 'M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z' },
-    { id: AppStep.HISTORY, label: 'Import History', icon: 'M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.25c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18c-2.305 0-4.408.867-6 2.292m0-14.25v14.25' },
-    { id: AppStep.INPUT, label: 'Website Target', icon: 'M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244' },
     { id: AppStep.STOCK_POINTS, label: 'Stock Points', icon: 'M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z' },
     { id: AppStep.RESULTS, label: 'Product Manager', icon: 'M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25a2.25 2.25 0 01-2.25 2.25h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25h-2.25a2.25 2.25 0 01-2.25-2.25v-2.25z' },
     { id: AppStep.STOCK_UPDATE, label: 'Stock Manager', icon: 'M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z' },
@@ -46,8 +40,6 @@ const Sidebar: React.FC<SidebarProps> = ({
   ];
 
   const handleStepClick = (stepId: AppStep) => {
-    if (stepId === AppStep.HISTORY) onGoToHistory();
-    if (stepId === AppStep.INPUT) onNewImport();
     if (stepId === AppStep.SETTINGS) onGoToSettings();
     if (stepId === AppStep.STOCK_UPDATE) onGoToStock();
     if (stepId === AppStep.ORDER_GENERATION) onGoToOrders();
