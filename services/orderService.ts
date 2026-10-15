@@ -275,6 +275,14 @@ export const validateConfig = (config: OrderGenerationConfig, products: Product[
   return null;
 };
 
+const newCustomerId = (): string =>
+  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = (Math.random() * 16) | 0;
+      return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+    });
+
 export const generateOrderPackages = (
   config: OrderGenerationConfig,
   products: Product[],
@@ -298,6 +306,8 @@ export const generateOrderPackages = (
     const customer = customers[o]?.customer || fallbackCustomer(country.code);
     const salesChannel = config.salesChannel || pick(config.salesChannels);
     const currency = config.channelCurrencies?.[salesChannel] || country.currency || config.currency;
+    // Customer id (UUID) shared by every sub-order of the parent order.
+    const customerId = newCustomerId();
     const contact = {
       title: customer.title,
       first_name: customer.first_name,
@@ -370,7 +380,7 @@ export const generateOrderPackages = (
             },
             sent_delivery_option: { eta_end: etaEnd, eta_start: etaStart },
           },
-          customer: { email, first_name: customer.first_name, last_name: customer.last_name, phone_number: customer.phone_number, title: customer.title },
+          customer: { id: customerId, email, first_name: customer.first_name, last_name: customer.last_name, phone_number: customer.phone_number, title: customer.title },
           pricing_details: { currency, address, price: total },
           order_items: orderItems,
           shipping_fees: [{ original_price: st.shipping, price: st.shipping }],
