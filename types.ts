@@ -257,3 +257,40 @@ export interface ManualStep {
   updatedAt: string;
   doneAt?: string;
 }
+
+// Product sheet read on a client website (Product Manager → Capture).
+export interface CapturedProduct {
+  name: string;
+  sku: string;
+  gtin: string;
+  productGroupId: string;
+  brand: string;
+  description: string;
+  images: string[];
+  url: string;
+  // Page the product was read on.
+  page: string;
+  price: string;
+  currency: string;
+  availability: string;
+  color: string;
+  size: string;
+  category: string;
+  characteristics: { name: string; value: string }[];
+  variants: {
+    sku: string; gtin: string; name: string; color: string; size: string;
+    price: string; currency: string; image: string; url: string; availability: string;
+  }[];
+  // json-ld | microdata | opengraph | html
+  source: string;
+  capturedAt: string;
+}
+
+export interface ProductCaptureSet {
+  id: string;
+  name: string;
+  project?: string;
+  createdAt: string;
+  updatedAt: string;
+  products: CapturedProduct[];
+}

@@ -54,6 +54,11 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
   OpenAPI file). Requests / results are saved with a required name and an optional project, and listed by project.
   `GET /items` results can be opened in the Product Manager.
 - **Product Manager**: open saved `GET /items` results, regenerate item / product IDs, build the `/items` payload, save it, and send it with `PATCH /items`.
+  **Capture from a website**: a bookmarklet run by the user in their own browser, on the client website (product
+  sheet, or category page whose product pages are read one by one in the user's session), reads the published product
+  data (schema.org JSON-LD / microdata, OpenGraph) plus specification tables, gallery images and description; the page
+  source can also be pasted. Captures (images as URLs, description, characteristics, variants with EAN / price) are
+  saved per project in the database (`product_captures`) and become Product Manager articles (one per variant).
 
 ## Database (Vercel Postgres / Neon)
 

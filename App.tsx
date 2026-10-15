@@ -17,6 +17,7 @@ import { settingsStore } from './services/appStores';
 import { initDbSync, migrateLegacyLocalConnections } from './services/dbSync';
 import { onestockItemsToProducts } from './utils/payloadUtils';
 import { setLastProject } from './services/payloadStore';
+import { initCaptureListener } from './services/captureService';
 
 const App: React.FC = () => {
   const [currentStep, setCurrentStep] = useState<AppStep>(AppStep.PROJECTS);
@@ -33,9 +34,12 @@ const App: React.FC = () => {
 
   useEffect(() => {
     migrateLegacyLocalConnections();
+    // Products sent by the capture bookmarklet open the Product Manager.
+    const stopCapture = initCaptureListener(() => setCurrentStep(AppStep.RESULTS));
     // Local cache of the removed Import History (the database copy is left untouched).
     try { localStorage.removeItem('onestock_import_history'); } catch { /* ignore */ }
     initDbSync();
+    return stopCapture;
   }, []);
 
   const handleUpdateProduct = (updatedProduct: Product) => {
@@ -60,9 +64,8 @@ const App: React.FC = () => {
     });
   };
 
-  // Loads OneStock items (saved GET /items result or /items payload) into the Product Manager.
-  const handleOpenItems = (items: any[], label: string, mode?: 'replace' | 'append', project?: string) => {
-    const loaded = onestockItemsToProducts(items, settings.salesChannel);
+  // Loads products into the Product Manager (replace or append to the current list).
+  const handleLoadProducts = (loaded: Product[], label: string, mode?: 'replace' | 'append', project?: string) => {
     const effectiveMode = mode || (products.length === 0 || window.confirm(
       `Replace the ${products.length} product(s) currently in the Product Manager with "${label}"?\n(Cancel = add them to the current list)`
     ) ? 'replace' : 'append');
@@ -80,6 +83,10 @@ const App: React.FC = () => {
     setError(null);
     setCurrentStep(AppStep.RESULTS);
   };
+
+  // Loads OneStock items (saved GET /items result or /items payload) into the Product Manager.
+  const handleOpenItems = (items: any[], label: string, mode?: 'replace' | 'append', project?: string) =>
+    handleLoadProducts(onestockItemsToProducts(items, settings.salesChannel), label, mode, project);
 
   const handleGenerateJson = (selected: Product[]) => {
     setSelectedProductsForJson(selected);
@@ -160,6 +167,7 @@ const App: React.FC = () => {
                 onAddProduct={handleAddProduct}
                 onDeleteProduct={handleDeleteProduct}
                 onOpenItems={handleOpenItems}
+                onLoadProducts={handleLoadProducts}
                 source={productSource}
               />
             )}

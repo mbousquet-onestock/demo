@@ -1,11 +1,14 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Product, AppSettings, GroundingSource } from '../types';
 import ImageModal from './ImageModal';
 import EditAssetModal from './EditAssetModal';
 import ProductEditModal from './ProductEditModal';
 import { RegenerateIdsDrawer, ItemsPushDrawer, SavedItemsPicker } from './ProductApiTools';
 import { buildItemsPayload } from '../utils/payloadUtils';
+import ProductCaptureDrawer from './ProductCaptureDrawer';
+import { captureDrawerRequest } from '../services/captureService';
+import { captureInboxStore } from '../services/appStores';
 
 interface StepResultsProps {
   products: Product[];
@@ -20,6 +23,7 @@ interface StepResultsProps {
   onAddProduct: (product: Product) => void;
   onDeleteProduct: (id: string) => void;
   onOpenItems: (items: any[], label: string, mode: 'replace' | 'append', project?: string) => void;
+  onLoadProducts: (products: Product[], label: string, mode: 'replace' | 'append', project?: string) => void;
   // Where the current list comes from (saved payload or project).
   source?: { label: string; project?: string } | null;
   isHistoryView?: boolean;
@@ -38,6 +42,7 @@ const StepResults: React.FC<StepResultsProps> = ({
   onAddProduct,
   onDeleteProduct,
   onOpenItems,
+  onLoadProducts,
   source,
   isHistoryView = false 
 }) => {
@@ -48,6 +53,10 @@ const StepResults: React.FC<StepResultsProps> = ({
   const [isRegenerateOpen, setIsRegenerateOpen] = useState(false);
   const [isItemsPushOpen, setIsItemsPushOpen] = useState(false);
   const [isSavedItemsOpen, setIsSavedItemsOpen] = useState(false);
+  // Opened by the user, or when the capture bookmarklet sends products.
+  const captureRequest = captureDrawerRequest.use();
+  const [isCaptureOpen, setIsCaptureOpen] = useState(captureRequest > 0 && captureInboxStore.get().length > 0);
+  useEffect(() => { if (captureRequest > 0) setIsCaptureOpen(true); }, [captureRequest]);
   const [searchTerm, setSearchTerm] = useState('');
   
   const [massEditField, setMassEditField] = useState<keyof Product>('name');
@@ -182,6 +191,14 @@ const StepResults: React.FC<StepResultsProps> = ({
         />
       )}
 
+      {isCaptureOpen && (
+        <ProductCaptureDrawer
+          defaultCurrency={products[0]?.currency || 'EUR'}
+          onAdd={(list, label, mode, project) => { onLoadProducts(list, label, mode, project); setIsCaptureOpen(false); }}
+          onClose={() => setIsCaptureOpen(false)}
+        />
+      )}
+
       {isItemsPushOpen && (
         <ItemsPushDrawer
           products={products.filter(p => selectedIds.has(p.id))}
@@ -297,6 +314,13 @@ const StepResults: React.FC<StepResultsProps> = ({
               className="w-full pl-10 pr-4 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:ring-1 focus:ring-onestock-blue focus:bg-white outline-none transition-all"
             />
           </div>
+
+          <button 
+            onClick={() => setIsCaptureOpen(true)}
+            className="px-3 py-2 text-xs font-bold text-onestock-blue border border-onestock-blue rounded-lg hover:bg-blue-50 transition-all flex items-center gap-2"
+          >
+            Capture from a website
+          </button>
 
           <button 
             onClick={() => setIsSavedItemsOpen(true)}
