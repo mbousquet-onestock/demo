@@ -248,73 +248,134 @@ export const ItemsPushDrawer: React.FC<ItemsPushDrawerProps> = ({ products, sett
 
 interface SavedItemsPickerProps {
   hasProducts: boolean;
-  onOpen: (items: any[], label: string, mode: 'replace' | 'append') => void;
+  onOpen: (items: any[], label: string, mode: 'replace' | 'append', project?: string) => void;
   onClose: () => void;
 }
 
-// Lists saved payloads holding OneStock items (GET /items results, /items payloads), grouped by project.
+interface ItemsCandidate {
+  payload: SavedPayload;
+  items: any[];
+  fromResult: boolean;
+}
+
+const NO_PROJECT = '';
+
+// Items of several payloads, one per item id: the most recent payload wins.
+const mergeItems = (candidates: ItemsCandidate[]): any[] => {
+  const byId = new Map<string, any>();
+  [...candidates]
+    .sort((a, b) => b.payload.createdAt.localeCompare(a.payload.createdAt))
+    .forEach(c => c.items.forEach(item => {
+      const id = String(item?.id ?? '');
+      if (id && !byId.has(id)) byId.set(id, item);
+    }));
+  return [...byId.values()];
+};
+
+// Saved payloads holding OneStock items (GET /items results, /items payloads), grouped by project.
 export const SavedItemsPicker: React.FC<SavedItemsPickerProps> = ({ hasProducts, onOpen, onClose }) => {
   const saved = savedPayloadsStore.use();
-  const [project, setProject] = useState('');
+  const [project, setProject] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
-  const candidates = useMemo(() => saved
+  const candidates = useMemo<ItemsCandidate[]>(() => saved
     .map(p => ({ payload: p, items: extractOnestockItems(p.response) || extractOnestockItems(p.request), fromResult: !!extractOnestockItems(p.response) }))
-    .filter((c): c is { payload: SavedPayload; items: any[]; fromResult: boolean } => !!c.items), [saved]);
+    .filter((c): c is ItemsCandidate => !!c.items), [saved]);
   const projects = listProjects(candidates.map(c => c.payload));
 
-  const visible = candidates.filter(({ payload }) => {
-    const q = search.trim().toLowerCase();
-    if (project && (payload.project || '') !== project) return false;
-    return !q || payload.name.toLowerCase().includes(q) || (payload.project || '').toLowerCase().includes(q);
-  });
+  const q = search.trim().toLowerCase();
+  const visible = candidates.filter(({ payload }) =>
+    (project === null || (payload.project || NO_PROJECT) === project)
+    && (!q || payload.name.toLowerCase().includes(q) || (payload.project || '').toLowerCase().includes(q)));
 
-  const open = (items: any[], label: string, mode: 'replace' | 'append') => {
-    onOpen(items, label, mode);
+  const groups = useMemo(() => {
+    const map = new Map<string, ItemsCandidate[]>();
+    visible.forEach(c => {
+      const key = (c.payload.project || '').trim();
+      map.set(key, [...(map.get(key) || []), c]);
+    });
+    return [...map.entries()].sort(([a], [b]) => (a === '' ? 1 : b === '' ? -1 : a.localeCompare(b)));
+  }, [visible]);
+
+  const open = (items: any[], label: string, mode: 'replace' | 'append', fromProject?: string) => {
+    onOpen(items, label, mode, fromProject || undefined);
     onClose();
   };
 
+  const loadButtons = (items: any[], label: string, fromProject: string | undefined, primary: boolean, wholeProject = false) => (
+    <>
+      <button
+        onClick={() => open(items, label, 'replace', fromProject)}
+        className={primary
+          ? 'px-3 py-1.5 text-xs font-bold text-white bg-onestock-blue rounded-lg hover:bg-[#001F4D]'
+          : 'px-3 py-1.5 text-xs font-bold text-onestock-blue border border-onestock-blue rounded-lg hover:bg-blue-50'}
+      >
+        {wholeProject ? (hasProducts ? 'Replace list with whole project' : 'Open whole project') : (hasProducts ? 'Replace list' : 'Open')}
+      </button>
+      {hasProducts && (
+        <button onClick={() => open(items, label, 'append', fromProject)} className="px-3 py-1.5 text-xs font-bold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
+          Add to list
+        </button>
+      )}
+    </>
+  );
+
   return (
-    <Drawer title="Open saved items" onClose={onClose} wide>
+    <Drawer title="Load saved /items payloads" onClose={onClose} wide>
       <div className="space-y-4">
         <p className="text-sm text-gray-500">
-          Saved payloads containing OneStock items: results of <code>GET /items</code> from the API Explorer, and saved <code>/items</code> payloads.
+          Saved payloads containing OneStock items — <code>GET /items</code> results from the API Explorer and <code>/items</code> payloads
+          saved from the Product Manager — grouped by project. Load one payload, or a whole project (items merged by id, most recent payload first).
         </p>
         <div className="flex gap-2">
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or project…" className="flex-1 px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg outline-none" />
-          <select value={project} onChange={e => setProject(e.target.value)} className="px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg outline-none">
-            <option value="">All projects</option>
+          <select
+            value={project === null ? '__all__' : project}
+            onChange={e => setProject(e.target.value === '__all__' ? null : e.target.value)}
+            className="px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg outline-none"
+          >
+            <option value="__all__">All projects</option>
             {projects.map(p => <option key={p} value={p}>{p}</option>)}
+            <option value={NO_PROJECT}>No project</option>
           </select>
         </div>
-        {visible.length === 0 ? (
+        {groups.length === 0 ? (
           <p className="p-10 text-center text-sm text-gray-400 border border-dashed border-gray-200 rounded-xl">
-            No saved payload with items. Call <code>GET /items</code> in the API Explorer and save the result.
+            No saved payload with items. Save a <code>GET /items</code> result in the API Explorer, or a payload from "Payload &amp; Push /items".
           </p>
         ) : (
-          <ul className="divide-y divide-gray-100 border border-gray-200 rounded-xl">
-            {visible.map(({ payload, items, fromResult }) => (
-              <li key={payload.id} className="p-4 flex flex-wrap items-center gap-2">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {payload.project && <span className="text-[9px] font-bold uppercase bg-blue-50 text-onestock-blue px-1.5 py-0.5 rounded">{payload.project}</span>}
-                    <span className="font-bold text-sm text-gray-900">{payload.name}</span>
+          <div className="space-y-4">
+            {groups.map(([groupProject, entries]) => {
+              const merged = mergeItems(entries);
+              const title = groupProject || 'No project';
+              return (
+                <div key={groupProject || '__none__'} className="border border-gray-200 rounded-xl overflow-hidden">
+                  <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-bold text-[#002D72] uppercase tracking-widest">{title}</span>
+                    <span className="text-[11px] text-gray-400">{entries.length} payload(s) · {merged.length} distinct item(s)</span>
+                    {groupProject && entries.length > 1 && (
+                      <div className="ml-auto flex gap-2">
+                        {loadButtons(merged, `all ${entries.length} /items payloads`, groupProject, true, true)}
+                      </div>
+                    )}
                   </div>
-                  <p className="text-[11px] text-gray-400 mt-0.5">
-                    {payload.method} {payload.path} · {fromResult ? 'result' : 'request'} · {items.length} item(s) · {payload.connectionName || '—'} · {new Date(payload.createdAt).toLocaleString()}
-                  </p>
+                  <ul className="divide-y divide-gray-100">
+                    {entries.map(({ payload, items, fromResult }) => (
+                      <li key={payload.id} className="p-4 flex flex-wrap items-center gap-2">
+                        <div className="min-w-0 flex-1">
+                          <span className="font-bold text-sm text-gray-900">{payload.name}</span>
+                          <p className="text-[11px] text-gray-400 mt-0.5">
+                            {payload.method} {payload.path} · {fromResult ? 'result' : 'request'} · {items.length} item(s) · {payload.source === 'products' ? 'Product Manager' : 'API Explorer'} · {new Date(payload.createdAt).toLocaleString()}
+                          </p>
+                        </div>
+                        {loadButtons(items, payload.name, payload.project, !(groupProject && entries.length > 1))}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-                <button onClick={() => open(items, payload.name, 'replace')} className="px-3 py-1.5 text-xs font-bold text-white bg-onestock-blue rounded-lg hover:bg-[#001F4D]">
-                  {hasProducts ? 'Replace current list' : 'Open'}
-                </button>
-                {hasProducts && (
-                  <button onClick={() => open(items, payload.name, 'append')} className="px-3 py-1.5 text-xs font-bold text-onestock-blue border border-onestock-blue rounded-lg hover:bg-blue-50">
-                    Add to list
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
+              );
+            })}
+          </div>
         )}
       </div>
     </Drawer>

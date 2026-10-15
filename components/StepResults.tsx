@@ -19,7 +19,9 @@ interface StepResultsProps {
   onUpdateProduct: (product: Product) => void;
   onAddProduct: (product: Product) => void;
   onDeleteProduct: (id: string) => void;
-  onOpenItems: (items: any[], label: string, mode: 'replace' | 'append') => void;
+  onOpenItems: (items: any[], label: string, mode: 'replace' | 'append', project?: string) => void;
+  // Where the current list comes from (saved payload or project).
+  source?: { label: string; project?: string } | null;
   isHistoryView?: boolean;
 }
 
@@ -36,6 +38,7 @@ const StepResults: React.FC<StepResultsProps> = ({
   onAddProduct,
   onDeleteProduct,
   onOpenItems,
+  source,
   isHistoryView = false 
 }) => {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -273,6 +276,12 @@ const StepResults: React.FC<StepResultsProps> = ({
         <div className="flex-1 min-w-0">
           <h2 className="text-xl font-bold text-[#002D72]">Step 2: Hierarchy Verification</h2>
           <p className="text-sm text-gray-500">Edit cells directly. Only selected items ({selectedIds.size}) are used in subsequent tools.</p>
+          {source && (
+            <p className="text-xs text-gray-500 mt-1">
+              Loaded from {source.project && <span className="text-[9px] font-bold uppercase bg-blue-50 text-onestock-blue px-1.5 py-0.5 rounded mr-1">{source.project}</span>}
+              <strong>{source.label}</strong>
+            </p>
+          )}
         </div>
         
         <div className="flex flex-wrap items-center gap-3">
@@ -293,7 +302,7 @@ const StepResults: React.FC<StepResultsProps> = ({
             onClick={() => setIsSavedItemsOpen(true)}
             className="px-3 py-2 text-xs font-bold text-onestock-blue border border-onestock-blue rounded-lg hover:bg-blue-50 transition-all flex items-center gap-2"
           >
-            Open saved items
+            Load saved /items payloads
           </button>
 
           <button 

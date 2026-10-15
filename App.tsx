@@ -19,6 +19,7 @@ import StepStockPoints from './components/StepStockPoints';
 import { historyStore, settingsStore } from './services/appStores';
 import { initDbSync, migrateLegacyLocalConnections } from './services/dbSync';
 import { onestockItemsToProducts } from './utils/payloadUtils';
+import { setLastProject } from './services/payloadStore';
 
 const App: React.FC = () => {
   const [currentStep, setCurrentStep] = useState<AppStep>(AppStep.HISTORY);
@@ -30,6 +31,8 @@ const App: React.FC = () => {
   const [selectedProductsForJson, setSelectedProductsForJson] = useState<Product[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isViewingHistory, setIsViewingHistory] = useState(false);
+  // Saved payload / project the Product Manager list was loaded from.
+  const [productSource, setProductSource] = useState<{ label: string; project?: string } | null>(null);
   // History and settings live in stores cached in localStorage and synced to the Vercel database.
   const history = historyStore.use();
   const setHistory = historyStore.set;
@@ -50,6 +53,7 @@ const App: React.FC = () => {
   };
 
   const handleScanComplete = (results: Product[], sources: GroundingSource[]) => {
+    setProductSource(null);
     setProducts(results);
     setGroundingSources(sources);
     setSelectedIds(new Set(results.map(p => p.id)));
@@ -79,11 +83,14 @@ const App: React.FC = () => {
   };
 
   // Loads OneStock items (saved GET /items result or /items payload) into the Product Manager.
-  const handleOpenItems = (items: any[], label: string, mode?: 'replace' | 'append') => {
+  const handleOpenItems = (items: any[], label: string, mode?: 'replace' | 'append', project?: string) => {
     const loaded = onestockItemsToProducts(items, settings.salesChannel);
     const effectiveMode = mode || (products.length === 0 || window.confirm(
       `Replace the ${products.length} product(s) currently in the Product Manager with "${label}"?\n(Cancel = add them to the current list)`
     ) ? 'replace' : 'append');
+    // The next payload save defaults to the project the items come from.
+    if (project) setLastProject(project);
+    setProductSource(prev => (effectiveMode === 'replace' || !prev ? { label, project } : { label: `${prev.label} + ${label}`, project: project || prev.project }));
     if (effectiveMode === 'replace') {
       setProducts(loaded);
       setSelectedIds(new Set(loaded.map(p => p.id)));
@@ -132,6 +139,7 @@ const App: React.FC = () => {
   };
 
   const handleViewHistoryItem = (site: ProcessedSite) => {
+    setProductSource(null);
     setTargetUrl(site.url);
     setProducts(site.products);
     setGroundingSources(site.sources || []);
@@ -141,6 +149,7 @@ const App: React.FC = () => {
   };
 
   const reset = () => {
+    setProductSource(null);
     setTargetUrl('');
     setProducts([]);
     setGroundingSources([]);
@@ -151,6 +160,7 @@ const App: React.FC = () => {
   };
 
   const goToInput = () => {
+    setProductSource(null);
     setTargetUrl('');
     setProducts([]);
     setGroundingSources([]);
@@ -246,6 +256,7 @@ const App: React.FC = () => {
                 onAddProduct={handleAddProduct}
                 onDeleteProduct={handleDeleteProduct}
                 onOpenItems={handleOpenItems}
+                source={productSource}
               />
             )}
 
