@@ -1,6 +1,7 @@
 import { OnestockApiVersion, SavedPayload, StockPointSet, OrderBatch } from '../types';
 import { onestockRequest, describeCallError, getApiTarget, ProxyResponseEnvelope } from './onestockClient';
-import { SOURCE_LABELS } from './payloadStore';
+import { SOURCE_LABELS, savedPayloadsStore } from './payloadStore';
+import { stockPointSetsStore, orderBatchesStore } from './appStores';
 
 // One API call that can be replayed from the Projects tab.
 export interface ReplayItem {
@@ -14,7 +15,8 @@ export interface ReplayItem {
   // Execution order of a mass replay: parent orders before their orders.
   priority: number;
   // Saved document holding the call (moving it to another project moves the whole document).
-  owner: { kind: 'payload' | 'set' | 'batch'; id: string; project?: string };
+  owner: { kind: 'payload' | 'set' | 'batch'; id: string; project?: string; part?: string };
+  // part: endpoint id (stock point set), "parent:<id>" / "order:<id>" (order batch).
   lastStatus?: number;
   lastResponse?: unknown;
 }
@@ -62,7 +64,7 @@ export const stockPointSetItems = (sets: StockPointSet[]): ReplayItem[] =>
     path: '/endpoints',
     body: { endpoint: ep },
     priority: 0,
-    owner: { kind: 'set' as const, id: s.id, project: s.project },
+    owner: { kind: 'set' as const, id: s.id, project: s.project, part: ep.id },
     lastStatus: s.pushResults?.[ep.id]?.status ?? undefined,
     lastResponse: s.pushResults?.[ep.id]?.message,
   })));
@@ -82,7 +84,7 @@ export const orderBatchItems = (batches: OrderBatch[]): ReplayItem[] =>
         body: pkg.parent,
         version: 'v4' as OnestockApiVersion,
         priority: 2,
-        owner,
+        owner: { ...owner, part: `parent:${parentId}` },
         lastStatus: parentResult?.status ?? undefined,
         lastResponse: parentResult?.message,
       },
@@ -96,7 +98,7 @@ export const orderBatchItems = (batches: OrderBatch[]): ReplayItem[] =>
           path: '/orders',
           body: o,
           priority: 3,
-          owner,
+          owner: { ...owner, part: `order:${o.order.id}` },
           lastStatus: r?.status ?? undefined,
           lastResponse: r?.message,
         };
@@ -125,4 +127,40 @@ export const replayItem = async (item: ReplayItem): Promise<ReplayResult> => {
   } catch (err: any) {
     return { ok: false, status: null, message: err?.message || String(err), at };
   }
+};
+
+// Deletes the saved calls: a saved payload, a stock point of its set, an order (a parent order removes its
+// sub-orders). A set / batch left empty is deleted.
+export const deleteReplayItems = (items: ReplayItem[]) => {
+  const now = new Date().toISOString();
+  const payloadIds = new Set(items.filter(i => i.owner.kind === 'payload').map(i => i.owner.id));
+  const parts = (kind: string) => {
+    const map = new Map<string, Set<string>>();
+    items.filter(i => i.owner.kind === kind && i.owner.part).forEach(i => map.set(i.owner.id, (map.get(i.owner.id) || new Set()).add(i.owner.part!)));
+    return map;
+  };
+  const setParts = parts('set');
+  const batchParts = parts('batch');
+
+  if (payloadIds.size) savedPayloadsStore.set(prev => prev.filter(p => !payloadIds.has(p.id)));
+  if (setParts.size) stockPointSetsStore.set(prev => prev.flatMap(s => {
+    const gone = setParts.get(s.id);
+    if (!gone) return [s];
+    const endpoints = s.endpoints.filter(ep => !gone.has(ep.id));
+    if (endpoints.length === 0) return [];
+    const pushResults = s.pushResults && Object.fromEntries(Object.entries(s.pushResults).filter(([id]) => !gone.has(id)));
+    return [{ ...s, endpoints, pushResults, count: endpoints.length, updatedAt: now }];
+  }));
+  if (batchParts.size) orderBatchesStore.set(prev => prev.flatMap(b => {
+    const gone = batchParts.get(b.id);
+    if (!gone) return [b];
+    const packages = b.packages
+      .filter(pkg => !gone.has(`parent:${pkg.parent.parent_order.id}`))
+      .map(pkg => ({ ...pkg, subOrders: pkg.subOrders.filter(o => !gone.has(`order:${o.order.id}`)) }))
+      .filter(pkg => pkg.subOrders.length > 0);
+    if (packages.length === 0) return [];
+    const keep = new Set(packages.flatMap(pkg => [`parent:${pkg.parent.parent_order.id}`, ...pkg.subOrders.map(o => `order:${o.order.id}`)]));
+    const pushResults = b.pushResults && Object.fromEntries(Object.entries(b.pushResults).filter(([k]) => keep.has(k)));
+    return [{ ...b, packages, pushResults, updatedAt: now }];
+  }));
 };

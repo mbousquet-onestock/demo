@@ -3,7 +3,7 @@ import { savedPayloadsStore } from '../services/payloadStore';
 import { stockPointSetsStore, orderBatchesStore, manualStepsStore } from '../services/appStores';
 import { useApiTarget, missingTargetFields, isProductionTarget } from '../services/onestockClient';
 import {
-  savedPayloadItems, stockPointSetItems, orderBatchItems, replayItem, ReplayItem, ReplayResult,
+  savedPayloadItems, stockPointSetItems, orderBatchItems, replayItem, deleteReplayItems, ReplayItem, ReplayResult,
 } from '../services/replayService';
 import { listImageProjects, renameImageProject } from '../services/imageHosting';
 import ProjectImages from './ProjectImages';
@@ -198,6 +198,19 @@ const StepProjects: React.FC = () => {
     setSelected(new Set());
     setMoveTarget('');
   };
+  // Deletes saved calls (a parent order also removes its sub-orders); nothing is deleted in OneStock.
+  const deleteCalls = (list: ReplayItem[]) => {
+    if (list.length === 0) return;
+    const parents = list.filter(i => i.owner.part?.startsWith('parent:')).length;
+    const what = list.length === 1 ? `"${list[0].label}"` : `${list.length} saved call(s)`;
+    if (!window.confirm(`Delete ${what} from the app?${parents ? `\n${parents} parent order(s): their sub-orders are deleted too.` : ''}\n\nNothing is deleted in OneStock.`)) return;
+    deleteReplayItems(list);
+    const keys = new Set(list.map(i => i.key));
+    setSelected(prev => new Set([...prev].filter(k => !keys.has(k))));
+    setResults(prev => Object.fromEntries(Object.entries(prev).filter(([k]) => !keys.has(k))));
+    if (openKey && keys.has(openKey)) setOpenKey(null);
+  };
+
   const newSubfolder = () => {
     if (!current || current === NO_PROJECT) return;
     const name = window.prompt(`New sub-folder of "${current}" (the selected calls are moved into it):`)?.trim();
@@ -340,12 +353,14 @@ const StepProjects: React.FC = () => {
                 )}
                 {selected.size > 0 && !running && (
                   <div className="w-full flex flex-wrap items-center gap-2 pt-2 border-t border-gray-100">
-                    <span className="text-[11px] text-gray-500">Move the selection to</span>
+                    <span className="text-[11px] text-gray-500">Selection:</span>
+                    <span className="text-[11px] text-gray-500">move to</span>
                     <input value={moveTarget} onChange={e => setMoveTarget(e.target.value)} list="projects-folders" placeholder="Folder (e.g. Client/Phase 1)" className="flex-1 min-w-[160px] px-3 py-1.5 text-xs bg-gray-50 border border-gray-200 rounded-lg outline-none" />
                     <button onClick={() => moveSelected(moveTarget)} disabled={!normPath(moveTarget)} className="px-3 py-1.5 text-xs font-bold text-[#002D72] border border-[#002D72]/30 rounded-lg hover:bg-blue-50 disabled:opacity-40">Move</button>
                     {current !== NO_PROJECT && (
                       <button onClick={newSubfolder} className="px-3 py-1.5 text-xs font-bold text-[#002D72] border border-[#002D72]/30 rounded-lg hover:bg-blue-50">+ New sub-folder</button>
                     )}
+                    <button onClick={() => deleteCalls(items.filter(i => selected.has(i.key)))} className="px-3 py-1.5 text-xs font-bold text-red-600 border border-red-200 rounded-lg hover:bg-red-50">Delete ({selected.size})</button>
                     <span className="w-full text-[10px] text-gray-400">A whole saved payload, stock point set or order batch is moved, even when only some of its calls are selected.</span>
                     <datalist id="projects-folders">{projects.filter(([k]) => k !== NO_PROJECT).map(([k]) => <option key={k} value={k} />)}</datalist>
                   </div>
@@ -389,6 +404,7 @@ const StepProjects: React.FC = () => {
                                 <button onClick={() => runOne(item)} disabled={!!running || !!targetMissing} className="px-2 py-1 text-[11px] font-bold text-white bg-emerald-600 rounded hover:bg-emerald-700 disabled:opacity-40 shrink-0">
                                   {running === item.key ? '…' : 'Replay'}
                                 </button>
+                                <button onClick={() => deleteCalls([item])} disabled={!!running} title="Delete this saved call" className="px-1.5 py-1 text-[11px] font-bold text-gray-400 hover:text-red-600 disabled:opacity-40 shrink-0">✕</button>
                               </div>
                               {r && !r.ok && <p className="px-4 pb-2 text-[11px] text-red-600 break-words">{r.message}{r.requestId ? ` · Request-Id ${r.requestId}` : ''}</p>}
                               {isOpen && (

@@ -29,7 +29,9 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
 - Only `*.onestock-retail.com` targets are allowed. Override with the `PROXY_ALLOWED_HOSTS` env var (comma-separated host suffixes).
 - **Projects**: everything saved per project (payloads, stock point sets, order batches, manual steps) and replay of
   the API calls one by one or in bulk (selection by call, group or all; stock points first, parent orders before their
-  orders), with the request and the saved / replay result side by side. Sub-folders: a project named `Client/Phase 1`
+  orders), with the request and the saved / replay result side by side. Saved calls can be deleted one by one (✕) or
+  in bulk (selection → Delete): a saved payload, a stock point of its set, an order (a parent order with its
+  sub-orders); an emptied set / batch is deleted. Nothing is deleted in OneStock. Sub-folders: a project named `Client/Phase 1`
   is the sub-folder `Phase 1` of `Client`; selecting a folder replays it with its sub-folders (optional). Calls can be
   moved to another (new) sub-folder, and a folder can be renamed / moved with all its sub-folders.
 - **API Settings**: API URL (qualif / prod shortcuts), version, site ID and token (paste the token returned by
