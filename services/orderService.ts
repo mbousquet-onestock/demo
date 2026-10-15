@@ -15,8 +15,9 @@ export interface OrderGenerationConfig {
   itemsMax: number;
   qtyMin: number;
   qtyMax: number;
-  countryCode: string;
-  countryName?: string;
+  // Destination countries: one is drawn per order (evenly spread).
+  countries: DestinationCountry[];
+  // Default currency, when neither the sales channel nor the country has one.
   currency: string;
   // Empty: a random sales channel among `salesChannels` for each order.
   salesChannel: string;
@@ -31,6 +32,12 @@ export interface OrderGenerationConfig {
   deliveryPoints: string[];
 }
 
+export interface DestinationCountry {
+  code: string;
+  name?: string;
+  currency?: string;
+}
+
 export interface CustomerIdentity {
   title: string;
   first_name: string;
@@ -43,6 +50,13 @@ export interface OrderPackage {
   parent: any;
   subOrders: any[];
   customer: CustomerIdentity;
+  country?: string;
+}
+
+// Customer of one order, in the country drawn for that order.
+export interface OrderCustomer {
+  customer: CustomerIdentity;
+  country: DestinationCountry;
 }
 
 const FALLBACK_COUNTRY_DATA: Record<string, { phonePrefix: string; titles: string[]; firstNames: string[]; lastNames: string[]; addresses: { city: string; zip_code: string; lines: string[] }[] }> = {
@@ -131,6 +145,39 @@ export const generateCustomers = async (
   return result;
 };
 
+// Draws a country per order (each selected country gets its share, order shuffled), then generates the customers
+// country by country.
+export const generateOrderCustomers = async (
+  orderCount: number,
+  countries: DestinationCountry[],
+  useAi: boolean,
+  onProgress?: (done: number, total: number) => void
+): Promise<{ customers: OrderCustomer[]; warnings: string[] }> => {
+  const drawn = Array.from({ length: orderCount }, (_, i) => countries[i % countries.length]);
+  for (let i = drawn.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [drawn[i], drawn[j]] = [drawn[j], drawn[i]];
+  }
+  const customers: OrderCustomer[] = new Array(orderCount);
+  const warnings: string[] = [];
+  let done = 0;
+  for (const country of countries) {
+    const slots = drawn.map((c, i) => (c.code === country.code ? i : -1)).filter(i => i >= 0);
+    if (slots.length === 0) continue;
+    let list: CustomerIdentity[];
+    try {
+      list = await generateCustomers(slots.length, country.code, country.name, useAi, d => onProgress?.(done + d, orderCount));
+    } catch (err: any) {
+      warnings.push(`AI customers failed for ${country.code} (${err?.message || err}): sample identities used.`);
+      list = await generateCustomers(slots.length, country.code, country.name, false);
+    }
+    slots.forEach((slot, k) => { customers[slot] = { customer: list[k], country }; });
+    done += slots.length;
+    onProgress?.(done, orderCount);
+  }
+  return { customers, warnings };
+};
+
 export const hasPrice = (p: Product) => (parseFloat(String(p.price).replace(',', '.')) || 0) > 0;
 
 // Prices for articles without a price, with ChatGPT (batches of 50); random 10–100 when AI is not used.
@@ -180,6 +227,7 @@ const STRATEGY_SETTINGS: Record<OrderStrategy, { types: string[]; deliveryMethod
 export const validateConfig = (config: OrderGenerationConfig, products: Product[]): string | null => {
   if (products.length === 0) return 'No article selected: select items in the Product Manager first.';
   if (config.strategies.length === 0) return 'Select at least one order strategy.';
+  if (config.countries.length === 0) return 'Select at least one destination country.';
   if (config.orderCount < 1) return 'The number of orders must be at least 1.';
   if ([config.subOrdersMin, config.itemsMin, config.qtyMin].some(v => v < 1)) return 'Minimum values must be at least 1.';
   if (config.subOrdersMin > config.subOrdersMax || config.itemsMin > config.itemsMax || config.qtyMin > config.qtyMax) return 'A minimum is greater than its maximum.';
@@ -191,7 +239,7 @@ export const validateConfig = (config: OrderGenerationConfig, products: Product[
 export const generateOrderPackages = (
   config: OrderGenerationConfig,
   products: Product[],
-  customers: CustomerIdentity[],
+  customers: OrderCustomer[],
   aiPrices: Record<string, number>
 ): OrderPackage[] => {
   const now = Math.floor(Date.now() / 1000);
@@ -207,9 +255,10 @@ export const generateOrderPackages = (
 
   for (let o = 0; o < config.orderCount; o++) {
     const parentId = incrementId(config.parentOrderId, o);
-    const customer = customers[o] || fallbackCustomer(config.countryCode);
+    const country = customers[o]?.country || config.countries[o % config.countries.length];
+    const customer = customers[o]?.customer || fallbackCustomer(country.code);
     const salesChannel = config.salesChannel || pick(config.salesChannels);
-    const currency = config.channelCurrencies?.[salesChannel] || config.currency;
+    const currency = config.channelCurrencies?.[salesChannel] || country.currency || config.currency;
     const contact = {
       title: customer.title,
       first_name: customer.first_name,
@@ -221,7 +270,7 @@ export const generateOrderPackages = (
       city: customer.address.city,
       contact,
       lines: customer.address.lines,
-      regions: { country: { code: config.countryCode } },
+      regions: { country: { code: country.code } },
       zip_code: customer.address.zip_code,
     };
 
@@ -274,7 +323,7 @@ export const generateOrderPackages = (
               cost: st.shipping,
               cutoff,
               delivery_method: st.deliveryMethod,
-              destination: { location: { country: config.countryCode, zip_code: customer.address.zip_code } },
+              destination: { location: { country: country.code, zip_code: customer.address.zip_code } },
               eta_end: etaEnd,
               eta_start: etaStart,
               shipment_number: 1,
@@ -293,6 +342,7 @@ export const generateOrderPackages = (
 
     packages.push({
       customer,
+      country: country.code,
       subOrders,
       parent: {
         site_id: SITE_ID_VAR,

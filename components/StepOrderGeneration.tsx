@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import JSZip from 'jszip';
 import { Product, AppSettings, OrderBatch } from '../types';
 import {
-  generateOrderPackages, generateCustomers, priceMissingArticles, validateConfig, incrementId, hasPrice,
+  generateOrderPackages, generateOrderCustomers, priceMissingArticles, validateConfig, incrementId, hasPrice,
   OrderGenerationConfig, OrderPackage, OrderStrategy, ORDER_STRATEGIES,
 } from '../services/orderService';
 import { fetchSalesChannels } from '../services/salesChannelService';
@@ -22,7 +22,8 @@ interface StepOrderGenerationProps {
 }
 
 const CONFIG_KEY = 'onestock_order_generation_config';
-const labelClass = 'block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2';
+const labelTight = 'block text-[10px] font-bold text-gray-400 uppercase tracking-widest';
+const labelClass = `${labelTight} mb-2`;
 const inputClass = 'w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm font-bold text-onestock-blue outline-none focus:border-onestock-blue';
 
 const STRATEGY_LABELS: Record<OrderStrategy, string> = {
@@ -36,7 +37,7 @@ const defaultParentId = () => {
   return `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}000001`;
 };
 
-type StoredConfig = Omit<OrderGenerationConfig, 'salesChannels' | 'deliveryPoints' | 'currency' | 'countryName'>;
+type StoredConfig = Omit<OrderGenerationConfig, 'salesChannels' | 'deliveryPoints' | 'currency' | 'countries'> & { countryCodes: string[] };
 
 const loadConfig = (settings: AppSettings): StoredConfig => {
   const defaults: StoredConfig = {
@@ -48,14 +49,18 @@ const loadConfig = (settings: AppSettings): StoredConfig => {
     itemsMax: 3,
     qtyMin: 1,
     qtyMax: 2,
-    countryCode: settings.deliveryCountries[0]?.code || 'FR',
+    countryCodes: [settings.deliveryCountries[0]?.code || 'FR'],
     salesChannel: '',
     parentOrderId: defaultParentId(),
     orderIdPrefix: '{TYPE}-',
     startIndex: 1,
   };
   try {
-    return { ...defaults, ...JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}') };
+    const stored = JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}');
+    // Earlier versions stored a single country.
+    if (!Array.isArray(stored.countryCodes) && stored.countryCode) stored.countryCodes = [stored.countryCode];
+    delete stored.countryCode;
+    return { ...defaults, ...stored };
   } catch {
     return defaults;
   }
@@ -106,6 +111,11 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
   const savedPayloads = savedPayloadsStore.use();
   const projects = useMemo(() => listProjects([...savedPayloads, ...batches]), [savedPayloads, batches]);
   const [batchProjectFilter, setBatchProjectFilter] = useState('');
+  const [toMerge, setToMerge] = useState<string[]>([]);
+  const [mergeName, setMergeName] = useState('');
+  const [mergeProject, setMergeProject] = useState('');
+  const [deleteMerged, setDeleteMerged] = useState(false);
+  const [mergeNotice, setMergeNotice] = useState<string | null>(null);
   const target = useApiTarget();
   const targetMissing = missingTargetFields(target);
   const [createParents, setCreateParents] = useState(true);
@@ -133,15 +143,15 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
   // First visit: load the sales channels from OneStock.
   useEffect(() => { if (channels.length === 0) loadChannels(); }, []);
 
-  const country = settings.deliveryCountries.find(c => c.code === config.countryCode);
+  const selectedCountries = settings.deliveryCountries.filter(c => config.countryCodes.includes(c.code));
   const channel = channels.find(c => c.id === config.salesChannel);
-  const currency = channel?.currency || country?.currency || products.find(p => p.currency)?.currency || 'EUR';
+  const currency = channel?.currency || selectedCountries[0]?.currency || products.find(p => p.currency)?.currency || 'EUR';
   const missingPrices = useMemo(() => products.filter(p => !hasPrice(p)).length, [products]);
   const needsPoints = config.strategies.some(s => s !== 'sfs');
 
   const fullConfig: OrderGenerationConfig = {
     ...config,
-    countryName: country?.name,
+    countries: selectedCountries,
     currency,
     salesChannels: channels.map(c => c.id),
     channelCurrencies: Object.fromEntries(channels.filter(c => c.currency).map(c => [c.id, c.currency!])),
@@ -156,16 +166,19 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
     if (!/^[A-Z]{2}$/.test(code) || !newCountry.name.trim()) return;
     const entry = { code, name: newCountry.name.trim(), currency: newCountry.currency.trim().toUpperCase() || undefined };
     onUpdateSettings({ deliveryCountries: [...settings.deliveryCountries.filter(c => c.code !== code), entry] });
-    set({ countryCode: code });
+    set({ countryCodes: Array.from(new Set([...config.countryCodes, code])) });
     setNewCountry({ code: '', name: '', currency: 'EUR' });
     setShowAddCountry(false);
   };
 
-  const removeCountry = () => {
-    if (!country || !window.confirm(`Remove ${country.name} (${country.code}) from the destination countries?`)) return;
-    const rest = settings.deliveryCountries.filter(c => c.code !== country.code);
-    onUpdateSettings({ deliveryCountries: rest });
-    set({ countryCode: rest[0]?.code || 'FR' });
+  const toggleCountry = (code: string) =>
+    set({ countryCodes: config.countryCodes.includes(code) ? config.countryCodes.filter(c => c !== code) : [...config.countryCodes, code] });
+
+  const removeCountry = (code: string) => {
+    const c = settings.deliveryCountries.find(x => x.code === code);
+    if (!c || !window.confirm(`Delete ${c.name} (${c.code}) from the saved destination countries?`)) return;
+    onUpdateSettings({ deliveryCountries: settings.deliveryCountries.filter(x => x.code !== code) });
+    set({ countryCodes: config.countryCodes.filter(x => x !== code) });
   };
 
   const setPoints = (ids: string[]) => onUpdateSettings({ orderDeliveryPoints: ids });
@@ -185,14 +198,9 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
     const warnings: string[] = [];
     try {
       setProgress('Generating customers…');
-      let customers;
-      try {
-        customers = await generateCustomers(config.orderCount, config.countryCode, country?.name, useAi && aiCustomers,
-          (d, t) => setProgress(`Generating customers ${d} / ${t}…`));
-      } catch (err: any) {
-        warnings.push(`AI customers failed (${err?.message || err}): sample identities used.`);
-        customers = await generateCustomers(config.orderCount, config.countryCode, country?.name, false);
-      }
+      const { customers, warnings: customerWarnings } = await generateOrderCustomers(
+        config.orderCount, selectedCountries, useAi && aiCustomers, (d, t) => setProgress(`Generating customers ${d} / ${t}…`));
+      warnings.push(...customerWarnings);
 
       let prices: Record<string, number> = {};
       if (missingPrices > 0) {
@@ -258,6 +266,45 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
     if (!window.confirm(`Delete the saved batch "${b.name}"? (Orders already created in OneStock are not deleted.)`)) return;
     orderBatchesStore.set(prev => prev.filter(x => x.id !== b.id));
     if (batch?.id === b.id) { setBatch(null); setDirty(false); }
+  };
+
+  const toggleMerge = (b: OrderBatch) => {
+    const next = toMerge.includes(b.id) ? toMerge.filter(id => id !== b.id) : [...toMerge, b.id];
+    setToMerge(next);
+    setMergeNotice(null);
+    if (next.length > 0 && toMerge.length === 0) {
+      setMergeProject(b.project || '');
+      setMergeName('');
+    }
+  };
+
+  // Several saved batches → one batch: packages concatenated (a parent order present twice is kept once),
+  // creation results kept.
+  const mergeBatches = () => {
+    const selected = batches.filter(b => toMerge.includes(b.id)).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    if (selected.length < 2) return;
+    const seen = new Set<string>();
+    const packagesMerged = selected.flatMap(b => b.packages).filter(p => {
+      const id = p.parent.parent_order.id;
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+    const duplicates = selected.reduce((n, b) => n + b.packages.length, 0) - packagesMerged.length;
+    const now = new Date().toISOString();
+    const merged: OrderBatch = {
+      id: Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
+      name: mergeName.trim() || `Merged: ${selected.map(b => b.name).join(' + ')}`,
+      project: mergeProject.trim() || undefined,
+      createdAt: now,
+      updatedAt: now,
+      packages: packagesMerged,
+      pushResults: Object.assign({}, ...selected.map(b => b.pushResults || {})),
+    };
+    orderBatchesStore.set(prev => [merged, ...prev.filter(b => !(deleteMerged && toMerge.includes(b.id)))]);
+    if (deleteMerged && batch && toMerge.includes(batch.id)) { setBatch(null); setDirty(false); }
+    setToMerge([]);
+    setMergeNotice(`"${merged.name}" created from ${selected.length} batches: ${packagesMerged.length} order(s)${duplicates ? `, ${duplicates} duplicate parent order(s) ignored` : ''}${deleteMerged ? ', originals deleted' : ''}.`);
   };
 
   const results: Record<string, OrderPushResult> = batch?.pushResults || {};
@@ -327,6 +374,8 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500 pb-20">
+      <datalist id="order-batch-projects">{projects.map(p => <option key={p} value={p} />)}</datalist>
+
       {isPickerOpen && (
         <StockPointsPicker
           hasEndpoints={deliveryPoints.length > 0}
@@ -385,15 +434,24 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">Destination country</label>
-                  <div className="flex gap-3">
-                    <button onClick={() => setShowAddCountry(v => !v)} className="text-[10px] font-bold text-onestock-blue hover:underline">{showAddCountry ? 'Cancel' : '+ Add'}</button>
-                    {country && settings.deliveryCountries.length > 1 && <button onClick={removeCountry} className="text-[10px] font-bold text-red-500 hover:underline">Remove</button>}
-                  </div>
+                  <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">Destination countries ({selectedCountries.length})</label>
+                  <button onClick={() => setShowAddCountry(v => !v)} className="text-[10px] font-bold text-onestock-blue hover:underline">{showAddCountry ? 'Cancel' : '+ Add'}</button>
                 </div>
-                <select value={config.countryCode} onChange={e => set({ countryCode: e.target.value })} className={inputClass}>
-                  {settings.deliveryCountries.map(c => <option key={c.code} value={c.code}>{c.code} — {c.name}{c.currency ? ` (${c.currency})` : ''}</option>)}
-                </select>
+                <div className="flex flex-wrap gap-1.5">
+                  {settings.deliveryCountries.map(c => {
+                    const active = config.countryCodes.includes(c.code);
+                    return (
+                      <span key={c.code} className={`flex items-center rounded-lg border text-xs font-bold ${active ? 'bg-[#002D72] border-[#002D72] text-white' : 'bg-white border-gray-200 text-gray-500'}`}>
+                        <button onClick={() => toggleCountry(c.code)} className="pl-2.5 pr-1.5 py-1.5" title={active ? 'Click to deselect' : 'Click to select'}>
+                          {c.code} <span className={`font-normal ${active ? 'text-white/70' : 'text-gray-400'}`}>{c.name}{c.currency ? ` · ${c.currency}` : ''}</span>
+                        </button>
+                        <button onClick={() => removeCountry(c.code)} className={`pr-2 pl-1 py-1.5 ${active ? 'text-white/40 hover:text-white' : 'text-gray-300 hover:text-red-500'}`} title="Delete from the saved countries">✕</button>
+                      </span>
+                    );
+                  })}
+                  {settings.deliveryCountries.length === 0 && <span className="text-xs text-gray-400">No country yet: add one.</span>}
+                </div>
+                <p className="text-[10px] text-gray-400 mt-1.5">Click to select · one selected country is drawn per order (evenly spread).</p>
                 {showAddCountry && (
                   <div className="flex gap-2 mt-2 p-3 bg-gray-50 rounded-lg border border-gray-100">
                     <input value={newCountry.code} onChange={e => setNewCountry({ ...newCountry, code: e.target.value.toUpperCase().slice(0, 2) })} placeholder="DE" className={inputClass + ' w-16'} title="ISO code" />
@@ -412,7 +470,7 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
                   <option value="">{channels.length ? `Random among the ${channels.length} channel(s)` : '— no sales channel loaded —'}</option>
                   {channels.map(c => (
                     <option key={c.id} value={c.id}>
-                      {c.id}{c.description || c.name ? ` — ${c.description || c.name}` : ''}{c.currency ? ` (${c.currency})` : ''}
+                      {c.id}{c.name || c.description ? ` — ${c.name || c.description}` : ''}{c.currency ? ` (${c.currency})` : ''}
                     </option>
                   ))}
                 </select>
@@ -451,25 +509,35 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
           {/* 3. Ids & data */}
           <section className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 space-y-5">
             <h3 className="text-sm font-bold text-[#002D72]"><span className="inline-flex w-6 h-6 rounded-full bg-[#002D72] text-white text-xs items-center justify-center mr-2">3</span>Ids & customer data</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div>
-                <label className={labelClass}>First parent order id</label>
-                <input value={config.parentOrderId} onChange={e => set({ parentOrderId: e.target.value })} className={inputClass + ' font-mono'} />
-              </div>
-              <div>
-                <label className={labelClass}>Sub-order prefix ({'{TYPE}'} = strategy)</label>
-                <input value={config.orderIdPrefix} onChange={e => set({ orderIdPrefix: e.target.value })} className={inputClass + ' font-mono'} />
-              </div>
-              <div>
-                <label className={labelClass}>Next sub-order number</label>
-                <input type="number" min={0} value={config.startIndex} onChange={e => set({ startIndex: parseInt(e.target.value) || 0 })} className={inputClass + ' font-mono'} />
-              </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-1">
+              <label className={labelTight}>First parent order id</label>
+              <label className={labelTight + ' hidden sm:block'}>Sub-order id prefix</label>
+              <label className={labelTight + ' hidden sm:block'}>Next sub-order number</label>
+              <input value={config.parentOrderId} onChange={e => set({ parentOrderId: e.target.value })} className={inputClass + ' font-mono'} />
+              <label className={labelTight + ' mt-3 sm:hidden'}>Sub-order id prefix</label>
+              <input value={config.orderIdPrefix} onChange={e => set({ orderIdPrefix: e.target.value })} className={inputClass + ' font-mono'} />
+              <label className={labelTight + ' mt-3 sm:hidden'}>Next sub-order number</label>
+              <input type="number" min={0} value={config.startIndex} onChange={e => set({ startIndex: parseInt(e.target.value) || 0 })} className={inputClass + ' font-mono'} />
+              <p className="text-[10px] text-gray-400">Incremented for each order</p>
+              <p className="text-[10px] text-gray-400">{'{TYPE}'} → SFS / CKC / ROPIS</p>
+              <p className="text-[10px] text-gray-400">Continues after each batch · next: <span className="font-mono">{previewId}</span></p>
             </div>
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 p-3 bg-gray-50 rounded-lg border border-gray-100">
-              <span className="text-xs font-bold text-gray-600">ChatGPT {aiAvailable ? '' : <span className="text-amber-600 font-normal">— no key in API Settings, sample data will be used</span>}</span>
-              <label className="flex items-center gap-2 text-xs text-gray-700"><input type="checkbox" checked={aiCustomers} disabled={!aiAvailable} onChange={e => setAiCustomers(e.target.checked)} /> Customers & addresses</label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 p-4 bg-gray-50 rounded-xl border border-gray-100 items-center">
+              <div>
+                <p className="text-xs font-bold text-gray-700">ChatGPT</p>
+                <p className="text-[10px] text-gray-400">{aiAvailable ? 'Key from API Settings' : <span className="text-amber-600">No key in API Settings — sample data used</span>}</p>
+              </div>
+              <label className="flex items-center gap-2 text-xs text-gray-700">
+                <input type="checkbox" checked={aiCustomers} disabled={!aiAvailable} onChange={e => setAiCustomers(e.target.checked)} />
+                Customers & addresses
+              </label>
               {missingPrices > 0
-                ? <label className="flex items-center gap-2 text-xs text-gray-700"><input type="checkbox" checked={aiPrices} disabled={!aiAvailable} onChange={e => setAiPrices(e.target.checked)} /> Prices of the {missingPrices} article(s) without price</label>
+                ? (
+                  <label className="flex items-center gap-2 text-xs text-gray-700">
+                    <input type="checkbox" checked={aiPrices} disabled={!aiAvailable} onChange={e => setAiPrices(e.target.checked)} />
+                    Prices of {missingPrices} article(s) without price
+                  </label>
+                )
                 : <span className="text-xs text-gray-400">All selected articles have a price</span>}
             </div>
           </section>
@@ -484,9 +552,9 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
               ['Orders', `${config.orderCount} parent order(s)`],
               ['Sub-orders', `${config.orderCount * config.subOrdersMin}${config.subOrdersMax !== config.subOrdersMin ? ` – ${config.orderCount * config.subOrdersMax}` : ''}`],
               ['Lines / sub-order', `${config.itemsMin}${config.itemsMax !== config.itemsMin ? `–${config.itemsMax}` : ''} item(s) × ${config.qtyMin}${config.qtyMax !== config.qtyMin ? `–${config.qtyMax}` : ''}`],
-              ['Country', country ? `${country.code} — ${country.name}` : config.countryCode],
-              ['Sales channel', config.salesChannel || (channels.length ? 'random' : '—')],
-              ['Currency', config.salesChannel ? currency : `per channel (default ${currency})`],
+              ['Countries', selectedCountries.length ? selectedCountries.map(c => c.code).join(', ') : '—'],
+              ['Sales channel', channel ? `${channel.id}${channel.name ? ` — ${channel.name}` : ''}` : (channels.length ? 'random' : '—')],
+              ['Currency', config.salesChannel ? currency : 'per channel / country'],
               ...(needsPoints ? [['Collection points', `${deliveryPoints.length}`]] : []),
               ['Customers', aiAvailable && aiCustomers ? 'ChatGPT' : 'sample data'],
               ['Parent ids', config.orderCount > 1 ? `${config.parentOrderId} → …${incrementId(config.parentOrderId, config.orderCount - 1).slice(-4)}` : config.parentOrderId],
@@ -523,7 +591,6 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
             </button>
           </div>
 
-          <datalist id="order-batch-projects">{projects.map(p => <option key={p} value={p} />)}</datalist>
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               <input value={batch?.project || ''} onChange={e => updateBatch({ project: e.target.value || undefined })} list="order-batch-projects" placeholder="Project" className="w-44 px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg outline-none" />
@@ -562,6 +629,7 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
                   {pkg.subOrders.some(o => results[orderKey(o.order.id)]) && (
                     <span className="text-[10px] font-bold text-gray-500">{pkg.subOrders.filter(o => results[orderKey(o.order.id)]?.ok).length}/{pkg.subOrders.length} sub-orders created</span>
                   )}
+                  {pkg.country && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{pkg.country}</span>}
                   <span className="text-xs text-gray-600">{pkg.customer.first_name} {pkg.customer.last_name} · {pkg.customer.address.zip_code} {pkg.customer.address.city}</span>
                   <span className="text-xs text-gray-400">{pkg.subOrders.map(o => o.order.id).join(', ')}</span>
                   <span className="ml-auto text-xs font-bold text-gray-700">{pkg.parent.parent_order.pricing_details.price} {pkg.parent.parent_order.pricing_details.currency}</span>
@@ -594,6 +662,17 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
             {listProjects(batches).map(p => <option key={p} value={p}>{p}</option>)}
           </select>
         </div>
+        {toMerge.length > 0 && (
+          <div className="p-4 bg-blue-50/60 border-b border-blue-100 flex flex-wrap items-center gap-2">
+            <span className="text-xs font-bold text-[#002D72]">{toMerge.length} batch(es) selected</span>
+            <input value={mergeProject} onChange={e => setMergeProject(e.target.value)} list="order-batch-projects" placeholder="Project" className="w-40 px-3 py-1.5 text-xs bg-white border border-gray-200 rounded-lg outline-none" />
+            <input value={mergeName} onChange={e => setMergeName(e.target.value)} placeholder="Name of the merged batch" className="flex-1 min-w-[180px] px-3 py-1.5 text-xs bg-white border border-gray-200 rounded-lg outline-none" />
+            <label className="flex items-center gap-1.5 text-xs text-gray-600"><input type="checkbox" checked={deleteMerged} onChange={e => setDeleteMerged(e.target.checked)} /> Delete the originals</label>
+            <button onClick={mergeBatches} disabled={toMerge.length < 2} className="px-3 py-1.5 text-xs font-bold text-white bg-onestock-blue rounded-lg hover:bg-[#001F4D] disabled:opacity-40">Merge into one batch</button>
+            <button onClick={() => setToMerge([])} className="px-3 py-1.5 text-xs font-bold text-gray-500">Cancel</button>
+          </div>
+        )}
+        {mergeNotice && <p className="m-4 text-sm text-blue-900 bg-blue-50 border border-blue-100 rounded-lg p-3">{mergeNotice}</p>}
         {batches.filter(b => !batchProjectFilter || (b.project || '') === batchProjectFilter).length === 0 ? (
           <p className="p-8 text-center text-sm text-gray-400">No saved batch yet.</p>
         ) : (
@@ -603,6 +682,7 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
               const ok = ids.filter(id => b.pushResults?.[orderKey(id)]?.ok).length;
               return (
                 <li key={b.id} className={`p-4 flex flex-wrap items-center gap-3 ${batch?.id === b.id ? 'bg-blue-50/50' : ''}`}>
+                  <input type="checkbox" checked={toMerge.includes(b.id)} onChange={() => toggleMerge(b)} title="Select to merge" className="w-4 h-4" />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       {b.project && <span className="text-[9px] font-bold uppercase bg-blue-50 text-onestock-blue px-1.5 py-0.5 rounded">{b.project}</span>}
