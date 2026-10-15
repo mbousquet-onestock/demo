@@ -134,7 +134,11 @@ export interface AppSettings {
   stockEndpoints: string[];
   endpoints: Endpoint[];
   orderSalesChannels: string[];
-  deliveryCountries: { code: string; name: string }[];
+  deliveryCountries: { code: string; name: string; currency?: string }[];
+  // Sales channels last loaded with GET /sales_channels (Order Generator).
+  salesChannelsCache?: { id: string; name?: string; currency?: string }[];
+  // Collection points used for CKC / ROPIS generated orders.
+  orderDeliveryPoints?: string[];
   rulesets: string[];
   defaultWeight: number;
   defaultHeight: number;

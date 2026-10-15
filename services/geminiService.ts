@@ -2,79 +2,10 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Product, GroundingSource } from "../types";
 
-export interface CustomerIdentity {
-  firstName: string;
-  lastName: string;
-  title: string;
-  address: {
-    city: string;
-    zip_code: string;
-    lines: string[];
-  };
-  phone: string;
-}
-
 export interface ScanResult {
   products: Product[];
   sources: GroundingSource[];
 }
-
-export const generateAIIdentities = async (countryCode: string, count: number): Promise<CustomerIdentity[]> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-  
-  const prompt = `Generate ${count} highly realistic and diverse delivery identities for the country: ${countryCode}. 
-  CONTEXT: One customer is placing ${count} different orders to different locations.
-  
-  REQUIREMENTS:
-  - Return ${count} unique delivery addresses (real cities, existing zip code formats, realistic street names for ${countryCode}).
-  - For the first entry, provide a complete profile (First Name, Last Name, Title, Phone).
-  - For the subsequent entries, you can vary the address significantly but keep the name and phone fields if possible, or provide varied ones (the application logic will prioritize the first one for the customer profile).
-  
-  Return as a JSON object with an "identities" array.`;
-
-  try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            identities: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  firstName: { type: Type.STRING },
-                  lastName: { type: Type.STRING },
-                  title: { type: Type.STRING },
-                  address: {
-                    type: Type.OBJECT,
-                    properties: {
-                      city: { type: Type.STRING },
-                      zip_code: { type: Type.STRING },
-                      lines: { type: Type.ARRAY, items: { type: Type.STRING } }
-                    },
-                    required: ["city", "zip_code", "lines"]
-                  },
-                  phone: { type: Type.STRING }
-                },
-                required: ["firstName", "lastName", "address", "phone"]
-              }
-            }
-          }
-        }
-      }
-    });
-
-    const data = JSON.parse(response.text.trim());
-    return data.identities || [];
-  } catch (error) {
-    console.error("Identity generation error:", error);
-    return [];
-  }
-};
 
 export const geocodeAddress = async (city: string, countryCode: string = 'FR'): Promise<{ latitude: number, longitude: number } | null> => {
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });

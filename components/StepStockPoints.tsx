@@ -57,14 +57,13 @@ const StepStockPoints: React.FC = () => {
 
   const handleGenerate = async () => {
     if (!context.trim()) { setError('Describe the context first.'); return; }
-    if (needsKey && !settings.openaiApiKey?.trim()) { setError('Enter an OpenAI API key (or set OPENAI_API_KEY on the server).'); return; }
+    if (needsKey && !settings.openaiApiKey?.trim()) { setError('Set an OpenAI API key in API Settings (or OPENAI_API_KEY on the server).'); return; }
     setError(null);
     setNotice(null);
     setGenerating(`Generating 0 / ${count}…`);
     try {
       const endpoints = await generateStockPoints({
-        context, count, idPrefix, model,
-        apiKey: needsKey ? settings.openaiApiKey : undefined,
+        context, count, idPrefix,
         onProgress: (done, total) => setGenerating(`Generating ${done} / ${total}…`),
       });
       const now = new Date().toISOString();
@@ -206,23 +205,10 @@ const StepStockPoints: React.FC = () => {
             <label className={labelClass}>Id prefix (optional)</label>
             <input value={idPrefix} onChange={e => setIdPrefix(e.target.value.replace(/\s+/g, ''))} placeholder="e.g. demo_" className={inputClass} />
           </div>
-          <div>
-            <label className={labelClass}>OpenAI model</label>
-            <input value={settings.openaiModel || ''} onChange={e => settingsStore.set(prev => ({ ...prev, openaiModel: e.target.value }))} placeholder={aiStatus?.defaultModel || 'gpt-4.1-mini'} className={inputClass} />
-          </div>
-          <div className="md:col-span-2">
-            <label className={labelClass}>
-              OpenAI API key {aiStatus?.serverKey ? '(optional — server key configured)' : ''}
-            </label>
-            <input
-              type="password"
-              value={settings.openaiApiKey || ''}
-              onChange={e => settingsStore.set(prev => ({ ...prev, openaiApiKey: e.target.value.trim() }))}
-              placeholder={aiStatus?.serverKey ? 'Uses OPENAI_API_KEY of the server' : 'sk-…'}
-              autoComplete="off"
-              className={inputClass + ' font-mono'}
-            />
-            <p className="text-[10px] text-gray-400 mt-1">Stored encrypted in the database (API Settings → Database) and kept in this browser.</p>
+          <div className="md:col-span-3 flex items-end">
+            <p className="text-[11px] text-gray-500">
+              OpenAI: model <strong>{model}</strong> · key {settings.openaiApiKey?.trim() ? 'from API Settings' : aiStatus?.serverKey ? 'of the server (OPENAI_API_KEY)' : <span className="text-red-600 font-bold">missing — set it in API Settings</span>}
+            </p>
           </div>
         </div>
 

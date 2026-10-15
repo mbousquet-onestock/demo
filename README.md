@@ -33,8 +33,12 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
 - **Stock Points**: describe a network (context) and a count; OpenAI generates OneStock stock locations through
   `api/ai.ts` (batches of 25). Review them in a table and on a map, edit them, save the set under a project (synced
   to the database) and create them with `POST /endpoints` (one call per point, or bulk), with the result per point.
-  OpenAI key: `OPENAI_API_KEY` on Vercel (usable only with the database access key), or a key typed in the tab
-  (stored encrypted). Model configurable (default `gpt-4.1-mini`).
+  OpenAI key: `OPENAI_API_KEY` on Vercel (usable only with the database access key), or a key typed in API Settings
+  → OpenAI (stored encrypted). Model configurable (default `gpt-4.1-mini`).
+- **Order Generator**: N orders (one parent order each) with min–max sub-orders, items per sub-order and quantity per
+  item; strategies SFS / CKC / ROPIS drawn per sub-order; CKC / ROPIS collection points drawn from a list; sales
+  channels loaded with `GET /sales_channels`; destination countries managed on the page; customers / addresses and
+  prices of articles without price generated with ChatGPT (API Settings key), sample data otherwise.
 - **API Explorer**: all GET routes of the OneStock spec (`data/onestockGetEndpoints.json`, generated from the
   OpenAPI file). Requests / results are saved with a required name and an optional project, and listed by project.
   `GET /items` results can be opened in the Product Manager.

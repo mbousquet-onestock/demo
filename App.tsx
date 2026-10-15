@@ -215,6 +215,7 @@ const App: React.FC = () => {
               <StepOrderGeneration 
                 products={selectedProducts} 
                 settings={settings} 
+                onUpdateSettings={patch => setSettings(prev => ({ ...prev, ...patch }))}
                 onCancel={() => setCurrentStep(AppStep.RESULTS)}
               />
             )}

@@ -1,27 +1,14 @@
 import { StockPointDraft, StockPointPushResult, OnestockApiVersion } from '../types';
 import { onestockRequest, getApiTarget, describeCallError } from './onestockClient';
-import { getAccessKey } from './dbSync';
-import { logApiCall } from './apiLog';
+import { callAi } from './aiService';
 
-export const AI_ENDPOINT = '/api/ai';
 // Sent to OpenAI per request: larger counts are generated in several batches.
 const AI_BATCH_SIZE = 25;
 export const MAX_STOCK_POINTS = 200;
 const BULK_CHUNK = 50;
 
-export interface AiStatus {
-  serverKey: boolean;
-  defaultModel: string;
-}
-
-export const getAiStatus = async (): Promise<AiStatus | null> => {
-  try {
-    const res = await fetch(AI_ENDPOINT);
-    return res.ok ? await res.json() : null;
-  } catch {
-    return null;
-  }
-};
+export { getAiStatus } from './aiService';
+export type { AiStatus } from './aiService';
 
 const sanitizeId = (value: unknown, fallback: string) =>
   (String(value ?? '').trim().replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || fallback);
@@ -47,8 +34,6 @@ export interface GenerateOptions {
   context: string;
   count: number;
   idPrefix?: string;
-  model?: string;
-  apiKey?: string;
   onProgress?: (done: number, total: number) => void;
 }
 
@@ -59,31 +44,12 @@ export const generateStockPoints = async (opts: GenerateOptions): Promise<StockP
 
   while (result.length < total) {
     const batch = Math.min(AI_BATCH_SIZE, total - result.length);
-    const request = {
+    const data = await callAi('stock_points', {
       context: opts.context,
       count: batch,
       idPrefix: opts.idPrefix,
-      model: opts.model,
       existingIds: result.map(e => e.id),
-    };
-    const started = Date.now();
-    const res = await fetch(AI_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-App-Key': getAccessKey() },
-      body: JSON.stringify({ ...request, apiKey: opts.apiKey || undefined }),
-    });
-    const data = await res.json().catch(() => null);
-    logApiCall({
-      method: 'POST',
-      url: 'OpenAI · generate stock points',
-      request,
-      status: res.status,
-      ok: res.ok,
-      durationMs: Date.now() - started,
-      response: data,
-      error: res.ok ? undefined : data?.error,
-    });
-    if (!res.ok) throw new Error(data?.error || `AI generation failed (HTTP ${res.status})`);
+    }, 'generate stock points');
 
     const received: unknown[] = Array.isArray(data?.endpoints) ? data.endpoints : [];
     if (received.length === 0) throw new Error('The AI returned no stock point. Try a more precise context.');

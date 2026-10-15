@@ -3,6 +3,7 @@ import React, { useState, useRef } from 'react';
 import { AppSettings } from '../types';
 import DatabaseSync from './DatabaseSync';
 import ApiTargetSettings from './ApiTargetSettings';
+import OpenAiSettings from './OpenAiSettings';
 
 interface SettingsProps {
   settings: AppSettings;
@@ -10,14 +11,12 @@ interface SettingsProps {
 }
 
 const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
-  const [newOrderChannel, setNewOrderChannel] = useState('');
   const [newRuleset, setNewRuleset] = useState('');
   const [newCountryCode, setNewCountryCode] = useState('');
   const [newCountryName, setNewCountryName] = useState('');
   const businessRulesFileRef = useRef<HTMLInputElement>(null);
   
   // Specific refs for individual imports
-  const channelFileRef = useRef<HTMLInputElement>(null);
   const rulesetFileRef = useRef<HTMLInputElement>(null);
   const countryFileRef = useRef<HTMLInputElement>(null);
 
@@ -76,7 +75,6 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
 
   const handleExportRules = () => {
     handleExportFile({
-      orderSalesChannels: settings.orderSalesChannels,
       rulesets: settings.rulesets,
       deliveryCountries: settings.deliveryCountries
     }, 'onestock_business_rules');
@@ -101,10 +99,9 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
           }
         } else {
           // Global import
-          if (data.orderSalesChannels || data.rulesets || data.deliveryCountries) {
+          if (data.rulesets || data.deliveryCountries) {
             onSave({
               ...settings,
-              orderSalesChannels: Array.isArray(data.orderSalesChannels) ? data.orderSalesChannels : settings.orderSalesChannels,
               rulesets: Array.isArray(data.rulesets) ? data.rulesets : settings.rulesets,
               deliveryCountries: Array.isArray(data.deliveryCountries) ? data.deliveryCountries : settings.deliveryCountries
             });
@@ -178,6 +175,8 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
 
       <ApiTargetSettings settings={settings} onSave={onSave} />
 
+      <OpenAiSettings settings={settings} onSave={onSave} />
+
       <DatabaseSync />
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
@@ -202,7 +201,6 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
         </div>
         
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-12">
-          {renderListManager('Order Sales Channels', 'orderSalesChannels', newOrderChannel, setNewOrderChannel, 'e.g. TikTok_ES', channelFileRef)}
           {renderListManager('Available Rulesets', 'rulesets', newRuleset, setNewRuleset, 'e.g. standard_ffs', rulesetFileRef)}
           
           <div className="space-y-4">

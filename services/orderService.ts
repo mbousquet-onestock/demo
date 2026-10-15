@@ -1,241 +1,308 @@
 import { SITE_ID_VAR, TOKEN_VAR } from './onestockClient';
+import { callAi } from './aiService';
+import { Product } from '../types';
 
-import { Product, AppSettings } from '../types';
-import { CustomerIdentity } from './geminiService';
+export type OrderStrategy = 'sfs' | 'ckc' | 'ropis';
+export const ORDER_STRATEGIES: OrderStrategy[] = ['sfs', 'ckc', 'ropis'];
 
-export interface OrderGenerationRequest {
-  type: 'sfs' | 'ckc' | 'ropis';
-  count: number;
-  productsPerOrder: number;
-  countryCode?: string;
-  salesChannel?: string;
+export interface OrderGenerationConfig {
+  strategies: OrderStrategy[];
+  // Number of customer orders (one parent order each).
+  orderCount: number;
+  subOrdersMin: number;
+  subOrdersMax: number;
+  itemsMin: number;
+  itemsMax: number;
+  qtyMin: number;
+  qtyMax: number;
+  countryCode: string;
+  countryName?: string;
+  currency: string;
+  // Empty: a random sales channel among `salesChannels` for each order.
+  salesChannel: string;
+  salesChannels: string[];
+  // Currency of each sales channel, when known (used instead of `currency`).
+  channelCurrencies?: Record<string, string>;
   parentOrderId: string;
+  // "{TYPE}" is replaced by the strategy of the sub-order (SFS, CKC, ROPIS).
   orderIdPrefix: string;
   startIndex: number;
-  endpointId?: string;
+  // Collection points for CKC / ROPIS sub-orders.
+  deliveryPoints: string[];
 }
 
-const FALLBACK_COUNTRY_DATA: Record<string, { currency: string, firstNames: string[], lastNames: string[], addresses: { city: string, zip_code: string, lines: string[] }[] }> = {
+export interface CustomerIdentity {
+  title: string;
+  first_name: string;
+  last_name: string;
+  phone_number: string;
+  address: { lines: string[]; city: string; zip_code: string };
+}
+
+export interface OrderPackage {
+  parent: any;
+  subOrders: any[];
+  customer: CustomerIdentity;
+}
+
+const FALLBACK_COUNTRY_DATA: Record<string, { phonePrefix: string; titles: string[]; firstNames: string[]; lastNames: string[]; addresses: { city: string; zip_code: string; lines: string[] }[] }> = {
   FR: {
-    currency: "EUR",
-    firstNames: ["Jean", "Marie", "William", "Elena", "Lucas", "Sophie", "Inès", "Pablo", "Oliver", "Amelia", "Théo", "Léa", "Manon", "Gabriel"],
-    lastNames: ["Dupont", "Lefebvre", "Martin", "Bernard", "Dubois", "Thomas", "Robert", "Richard", "Petit", "Durand"],
-    addresses: [{ city: "Toulouse", zip_code: "31400", lines: ["8 Rue des Trente-Six Ponts"] }]
+    phonePrefix: '+336',
+    titles: ['M.', 'Mme'],
+    firstNames: ['Jean', 'Marie', 'Lucas', 'Sophie', 'Inès', 'Théo', 'Léa', 'Manon', 'Gabriel', 'Camille'],
+    lastNames: ['Dupont', 'Lefebvre', 'Martin', 'Bernard', 'Dubois', 'Thomas', 'Robert', 'Richard', 'Petit', 'Durand'],
+    addresses: [
+      { city: 'Toulouse', zip_code: '31400', lines: ['8 Rue des Trente-Six Ponts'] },
+      { city: 'Paris', zip_code: '75011', lines: ['24 Rue Oberkampf'] },
+      { city: 'Lyon', zip_code: '69003', lines: ['15 Cours Lafayette'] },
+      { city: 'Nantes', zip_code: '44000', lines: ['3 Rue Crébillon'] },
+    ],
   },
   GB: {
-    currency: "GBP",
-    firstNames: ["James", "Mary", "Robert"],
-    lastNames: ["Smith", "Jones", "Taylor"],
-    addresses: [{ city: "London", zip_code: "W1U 1EE", lines: ["10-12 James St"] }]
+    phonePrefix: '+447',
+    titles: ['Mr', 'Mrs', 'Ms'],
+    firstNames: ['James', 'Mary', 'Robert', 'Olivia', 'George'],
+    lastNames: ['Smith', 'Jones', 'Taylor', 'Brown', 'Wilson'],
+    addresses: [{ city: 'London', zip_code: 'W1U 1EE', lines: ['10-12 James St'] }, { city: 'Manchester', zip_code: 'M1 1AE', lines: ['5 Piccadilly'] }],
   },
   ES: {
-    currency: "EUR",
-    firstNames: ["Antonio", "Maria", "Jose"],
-    lastNames: ["Garcia", "Rodriguez", "Gonzalez"],
-    addresses: [{ city: "Madrid", zip_code: "28001", lines: ["Calle de Serrano, 1"] }]
+    phonePrefix: '+346',
+    titles: ['Sr.', 'Sra.'],
+    firstNames: ['Antonio', 'Maria', 'Jose', 'Lucia', 'Pablo'],
+    lastNames: ['Garcia', 'Rodriguez', 'Gonzalez', 'Fernandez', 'Lopez'],
+    addresses: [{ city: 'Madrid', zip_code: '28001', lines: ['Calle de Serrano, 1'] }, { city: 'Barcelona', zip_code: '08002', lines: ['Carrer de Ferran, 10'] }],
   },
   CH: {
-    currency: "CHF",
-    firstNames: ["Lukas", "Sophie", "Thomas", "Anna", "Jakob", "Julia", "Marc", "Heidi"],
-    lastNames: ["Müller", "Schmidt", "Schneider", "Fischer", "Meyer", "Weber", "Favre", "Rossi"],
-    addresses: [{ city: "Zürich", zip_code: "8001", lines: ["Bahnhofstrasse 1"] }, { city: "Geneva", zip_code: "1201", lines: ["Rue du Rhône 10"] }]
-  }
+    phonePrefix: '+417',
+    titles: ['Herr', 'Frau'],
+    firstNames: ['Lukas', 'Sophie', 'Thomas', 'Anna', 'Marc'],
+    lastNames: ['Müller', 'Schmidt', 'Fischer', 'Meyer', 'Favre'],
+    addresses: [{ city: 'Zürich', zip_code: '8001', lines: ['Bahnhofstrasse 1'] }, { city: 'Geneva', zip_code: '1201', lines: ['Rue du Rhône 10'] }],
+  },
 };
 
-const getRandom = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+const randomInt = (min: number, max: number) => {
+  const lo = Math.min(min, max);
+  const hi = Math.max(min, max);
+  return lo + Math.floor(Math.random() * (hi - lo + 1));
+};
+const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
-export const generateOrderPayloads = (
-  request: OrderGenerationRequest,
-  availableProducts: Product[],
-  settings: AppSettings,
-  aiIdentities?: CustomerIdentity[]
-) => {
-  // Variables resolved with the API Settings values when the payload is sent.
-  const siteId = SITE_ID_VAR;
-  const token = TOKEN_VAR;
-  const now = Math.floor(Date.now() / 1000);
-  const oneDay = 86400;
-  
-  const cutoff = now + (3600 * 4);
-  const etaStart = now + (oneDay * 2);
-  const etaEnd = now + (oneDay * 5);
+const fallbackCustomer = (countryCode: string): CustomerIdentity => {
+  const data = FALLBACK_COUNTRY_DATA[countryCode] || FALLBACK_COUNTRY_DATA.FR;
+  return {
+    title: pick(data.titles),
+    first_name: pick(data.firstNames),
+    last_name: pick(data.lastNames),
+    phone_number: `${data.phonePrefix}${randomInt(10000000, 99999999)}`,
+    address: pick(data.addresses),
+  };
+};
 
-  const parentIdValue = request.parentOrderId;
-  const countryCode = request.countryCode || 'FR';
-  const fallbackLocalData = FALLBACK_COUNTRY_DATA[countryCode] || FALLBACK_COUNTRY_DATA.FR;
-  
-  const mainAiIdentity = aiIdentities && aiIdentities.length > 0 ? aiIdentities[0] : null;
-  const mainFirstName = mainAiIdentity ? mainAiIdentity.firstName : getRandom(fallbackLocalData.firstNames);
-  const mainLastName = mainAiIdentity ? mainAiIdentity.lastName : getRandom(fallbackLocalData.lastNames);
-  const mainTitle = mainAiIdentity ? mainAiIdentity.title : getRandom(['M.', 'Mme', 'Sir']);
-  const mainEmail = `alertes_os@onestock-retail.com`; 
-  const mainPhone = mainAiIdentity ? mainAiIdentity.phone : (countryCode === 'GB' ? '+44 7123456789' : '+33 612345678');
-  
-  const mainBillingAddress = mainAiIdentity ? mainAiIdentity.address : getRandom(fallbackLocalData.addresses);
+// Customer identities / addresses with ChatGPT (batches of 25); local sample data when AI is not used.
+export const generateCustomers = async (
+  count: number,
+  countryCode: string,
+  countryName: string | undefined,
+  useAi: boolean,
+  onProgress?: (done: number, total: number) => void
+): Promise<CustomerIdentity[]> => {
+  if (!useAi) return Array.from({ length: count }, () => fallbackCustomer(countryCode));
+  const result: CustomerIdentity[] = [];
+  while (result.length < count) {
+    const batch = Math.min(25, count - result.length);
+    const data = await callAi<{ customers: any[] }>('customers', { countryCode, countryName, count: batch }, `customers ${countryCode}`);
+    const received = (data.customers || []).filter(c => c && c.first_name && c.address?.city);
+    if (received.length === 0) throw new Error('The AI returned no customer.');
+    received.slice(0, batch).forEach(c => result.push({
+      title: String(c.title || ''),
+      first_name: String(c.first_name),
+      last_name: String(c.last_name || ''),
+      phone_number: String(c.phone_number || ''),
+      address: {
+        lines: Array.isArray(c.address.lines) ? c.address.lines.map(String) : [String(c.address.lines || '')],
+        city: String(c.address.city),
+        zip_code: String(c.address.zip_code || ''),
+      },
+    }));
+    onProgress?.(result.length, count);
+  }
+  return result;
+};
 
-  const orders: any[] = [];
-  let totalParentPrice = 0;
-  const currency = fallbackLocalData.currency || availableProducts[0]?.currency || "EUR";
+export const hasPrice = (p: Product) => (parseFloat(String(p.price).replace(',', '.')) || 0) > 0;
 
-  for (let i = 0; i < request.count; i++) {
-    const currentAiId = aiIdentities && aiIdentities[i] ? aiIdentities[i] : null;
-    const deliveryAddressData = currentAiId ? currentAiId.address : getRandom(fallbackLocalData.addresses);
-    const salesChannel = request.salesChannel || getRandom(settings.orderSalesChannels);
-    
-    let subtotal = 0;
-    const shuffled = [...availableProducts].sort(() => 0.5 - Math.random());
-    const selected = shuffled.slice(0, Math.min(request.productsPerOrder, availableProducts.length));
-
-    const orderItems = selected.map(p => {
-      const price = parseFloat(p.price) || 0;
-      subtotal += price;
-      return {
-        item_id: p.sku,
-        quantity: 1,
-        pricing_details: {
-          original_price: price,
-          price: price,
-          original_unit_price: price,
-          unit_price: price
-        },
-        information: {}
-      };
+// Prices for articles without a price, with ChatGPT (batches of 50); random 10–100 when AI is not used.
+export const priceMissingArticles = async (
+  products: Product[],
+  currency: string,
+  useAi: boolean,
+  onProgress?: (done: number, total: number) => void
+): Promise<Record<string, number>> => {
+  const missing = products.filter(p => !hasPrice(p));
+  const prices: Record<string, number> = {};
+  if (!useAi) {
+    missing.forEach(p => { prices[p.sku] = round2(randomInt(1000, 10000) / 100); });
+    return prices;
+  }
+  for (let i = 0; i < missing.length; i += 50) {
+    const chunk = missing.slice(i, i + 50);
+    const data = await callAi<{ prices: { sku: string; price: number }[] }>('prices', {
+      currency,
+      items: chunk.map(p => ({ sku: p.sku, name: p.name, category: p.category, description: p.description })),
+    }, `prices (${chunk.length} articles)`);
+    (data.prices || []).forEach(r => {
+      const price = Number(r?.price);
+      if (r?.sku && price > 0) prices[String(r.sku)] = round2(price);
     });
+    onProgress?.(Math.min(i + 50, missing.length), missing.length);
+  }
+  // Anything the AI skipped still gets a price.
+  missing.forEach(p => { if (!prices[p.sku]) prices[p.sku] = round2(randomInt(1000, 10000) / 100); });
+  return prices;
+};
 
-    const shippingPrice = request.type === 'sfs' ? 10 : 0;
-    const totalPrice = parseFloat((subtotal + shippingPrice).toFixed(2));
-    totalParentPrice += totalPrice;
-    
-    const currentIndex = request.startIndex + i;
-    const counter = currentIndex.toString().padStart(3, '0');
-    const orderId = `${request.orderIdPrefix}${counter}`;
-    
-    let orderTypes: string[] = [];
-    let deliveryMethod = "standard_hd";
-    if (request.type === 'sfs') {
-      orderTypes = ['ffs'];
-      deliveryMethod = "standard_hd";
-    } else if (request.type === 'ckc') {
-      orderTypes = ['ffs', 'ckc'];
-      deliveryMethod = "standard_ckc";
-    } else {
-      orderTypes = ['ropis'];
-      deliveryMethod = "standard_ropis";
-    }
+// Next id: the trailing number is incremented, keeping its width (2026100001 → 2026100002, ORD-9 → ORD-10).
+export const incrementId = (id: string, by = 1): string => {
+  const match = id.match(/^(.*?)(\d+)$/);
+  if (!match) return `${id}-${by}`;
+  const next = (BigInt(match[2]) + BigInt(by)).toString().padStart(match[2].length, '0');
+  return `${match[1]}${next}`;
+};
 
-    const orderPayload = {
-      site_id: siteId,
-      token: token,
-      order: {
-        id: orderId,
-        parent_order_id: parentIdValue,
-        types: orderTypes,
-        sales_channel: salesChannel,
-        date: now,
-        delivery: {
-          destination: {
-            address: {
-              city: deliveryAddressData.city,
-              contact: {
-                title: mainTitle,
-                first_name: mainFirstName,
-                last_name: mainLastName,
-                phone_number: mainPhone,
-                email: mainEmail
-              },
-              lines: deliveryAddressData.lines,
-              regions: {
-                country: {
-                  code: countryCode
-                }
-              },
-              zip_code: deliveryAddressData.zip_code
-            },
-            ...(request.type !== 'sfs' ? { endpoint_id: request.endpointId || (settings.endpoints.length > 0 ? getRandom(settings.endpoints.map(e => e.id)) : getRandom(settings.stockEndpoints)) } : {})
-          },
-          carrier: {
-            name: "mock"
-          },
-          type: "standard"
-        },
-        delivery_promise: {
-          original_delivery_option: {
-            carbon_footprint: 100,
-            cost: shippingPrice || 15,
-            cutoff: cutoff,
-            delivery_method: deliveryMethod,
-            destination: {
-              location: {
-                country: countryCode,
-                zip_code: deliveryAddressData.zip_code
-              }
-            },
-            eta_end: etaEnd,
-            eta_start: etaStart,
-            shipment_number: 1,
-            status: "valid"
-          },
-          sent_delivery_option: {
-            eta_end: etaEnd,
-            eta_start: etaStart
-          }
-        },
-        customer: {
-          email: mainEmail,
-          first_name: mainFirstName,
-          last_name: mainLastName,
-          phone_number: mainPhone,
-          title: "" 
-        },
-        pricing_details: {
-          currency: currency,
-          address: {
-            city: mainBillingAddress.city,
-            contact: {
-              title: mainTitle,
-              first_name: mainFirstName,
-              last_name: mainLastName,
-              phone_number: mainPhone,
-              email: mainEmail
-            },
-            lines: mainBillingAddress.lines,
-            regions: {
-              country: {
-                code: countryCode
-              }
-            },
-            zip_code: mainBillingAddress.zip_code
-          },
-          price: totalPrice
-        },
-        order_items: orderItems,
-        shipping_fees: [
-          {
-            original_price: shippingPrice,
-            price: shippingPrice
-          }
-        ],
-        ...(request.type === 'ckc' ? { sign_on_collect: true } : {})
-      }
+const STRATEGY_SETTINGS: Record<OrderStrategy, { types: string[]; deliveryMethod: string; shipping: number }> = {
+  sfs: { types: ['ffs'], deliveryMethod: 'standard_hd', shipping: 10 },
+  ckc: { types: ['ffs', 'ckc'], deliveryMethod: 'standard_ckc', shipping: 0 },
+  ropis: { types: ['ropis'], deliveryMethod: 'standard_ropis', shipping: 0 },
+};
+
+export const validateConfig = (config: OrderGenerationConfig, products: Product[]): string | null => {
+  if (products.length === 0) return 'No article selected: select items in the Product Manager first.';
+  if (config.strategies.length === 0) return 'Select at least one order strategy.';
+  if (config.orderCount < 1) return 'The number of orders must be at least 1.';
+  if ([config.subOrdersMin, config.itemsMin, config.qtyMin].some(v => v < 1)) return 'Minimum values must be at least 1.';
+  if (config.subOrdersMin > config.subOrdersMax || config.itemsMin > config.itemsMax || config.qtyMin > config.qtyMax) return 'A minimum is greater than its maximum.';
+  if (config.strategies.some(s => s !== 'sfs') && config.deliveryPoints.length === 0) return 'CKC / ROPIS need at least one delivery point.';
+  if (!config.salesChannel && config.salesChannels.length === 0) return 'No sales channel: load them from OneStock or type one.';
+  return null;
+};
+
+export const generateOrderPackages = (
+  config: OrderGenerationConfig,
+  products: Product[],
+  customers: CustomerIdentity[],
+  aiPrices: Record<string, number>
+): OrderPackage[] => {
+  const now = Math.floor(Date.now() / 1000);
+  const day = 86400;
+  const cutoff = now + 3600 * 4;
+  const etaStart = now + day * 2;
+  const etaEnd = now + day * 5;
+  const email = 'alertes_os@onestock-retail.com';
+  const unitPrice = (p: Product) => (hasPrice(p) ? round2(parseFloat(String(p.price).replace(',', '.'))) : aiPrices[p.sku] ?? 0);
+
+  const packages: OrderPackage[] = [];
+  let counter = config.startIndex;
+
+  for (let o = 0; o < config.orderCount; o++) {
+    const parentId = incrementId(config.parentOrderId, o);
+    const customer = customers[o] || fallbackCustomer(config.countryCode);
+    const salesChannel = config.salesChannel || pick(config.salesChannels);
+    const currency = config.channelCurrencies?.[salesChannel] || config.currency;
+    const contact = {
+      title: customer.title,
+      first_name: customer.first_name,
+      last_name: customer.last_name,
+      phone_number: customer.phone_number,
+      email,
+    };
+    const address = {
+      city: customer.address.city,
+      contact,
+      lines: customer.address.lines,
+      regions: { country: { code: config.countryCode } },
+      zip_code: customer.address.zip_code,
     };
 
-    orders.push(orderPayload);
-  }
+    const subOrders: any[] = [];
+    let parentTotal = 0;
+    const subCount = randomInt(config.subOrdersMin, config.subOrdersMax);
 
-  const parentOrderPayload = {
-    site_id: siteId,
-    token: token,
-    parent_order: {
-      id: parentIdValue,
-      pricing_details: {
-        price: parseFloat(totalParentPrice.toFixed(2)),
-        currency
-      }
+    for (let s = 0; s < subCount; s++) {
+      const strategy = pick(config.strategies);
+      const st = STRATEGY_SETTINGS[strategy];
+      const itemCount = Math.min(randomInt(config.itemsMin, config.itemsMax), products.length);
+      const selected = [...products].sort(() => 0.5 - Math.random()).slice(0, itemCount);
+
+      let subtotal = 0;
+      const orderItems = selected.map(p => {
+        const quantity = randomInt(config.qtyMin, config.qtyMax);
+        const unit = unitPrice(p);
+        const price = round2(unit * quantity);
+        subtotal += price;
+        return {
+          item_id: p.sku,
+          quantity,
+          pricing_details: { original_price: price, price, original_unit_price: unit, unit_price: unit },
+          information: {},
+        };
+      });
+
+      const total = round2(subtotal + st.shipping);
+      parentTotal += total;
+      const orderId = `${config.orderIdPrefix.replace(/\{TYPE\}/gi, strategy.toUpperCase())}${String(counter++).padStart(3, '0')}`;
+      const endpointId = strategy === 'sfs' ? undefined : pick(config.deliveryPoints);
+
+      subOrders.push({
+        site_id: SITE_ID_VAR,
+        token: TOKEN_VAR,
+        order: {
+          id: orderId,
+          parent_order_id: parentId,
+          types: st.types,
+          sales_channel: salesChannel,
+          date: now,
+          delivery: {
+            destination: { address, ...(endpointId ? { endpoint_id: endpointId } : {}) },
+            carrier: { name: 'mock' },
+            type: 'standard',
+          },
+          delivery_promise: {
+            original_delivery_option: {
+              carbon_footprint: 100,
+              cost: st.shipping,
+              cutoff,
+              delivery_method: st.deliveryMethod,
+              destination: { location: { country: config.countryCode, zip_code: customer.address.zip_code } },
+              eta_end: etaEnd,
+              eta_start: etaStart,
+              shipment_number: 1,
+              status: 'valid',
+            },
+            sent_delivery_option: { eta_end: etaEnd, eta_start: etaStart },
+          },
+          customer: { email, first_name: customer.first_name, last_name: customer.last_name, phone_number: customer.phone_number, title: customer.title },
+          pricing_details: { currency, address, price: total },
+          order_items: orderItems,
+          shipping_fees: [{ original_price: st.shipping, price: st.shipping }],
+          ...(strategy === 'ckc' ? { sign_on_collect: true } : {}),
+        },
+      });
     }
-  };
 
-  return {
-    parent: parentOrderPayload,
-    subOrders: orders
-  };
+    packages.push({
+      customer,
+      subOrders,
+      parent: {
+        site_id: SITE_ID_VAR,
+        token: TOKEN_VAR,
+        parent_order: {
+          id: parentId,
+          pricing_details: { price: round2(parentTotal), currency },
+        },
+      },
+    });
+  }
+  return packages;
 };
