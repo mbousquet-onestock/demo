@@ -13,6 +13,8 @@ export interface ReplayItem {
   version?: OnestockApiVersion;
   // Execution order of a mass replay: parent orders before their orders.
   priority: number;
+  // Saved document holding the call (moving it to another project moves the whole document).
+  owner: { kind: 'payload' | 'set' | 'batch'; id: string; project?: string };
   lastStatus?: number;
   lastResponse?: unknown;
 }
@@ -46,6 +48,7 @@ export const savedPayloadItems = (payloads: SavedPayload[]): ReplayItem[] =>
     body: (p.request && typeof p.request === 'object' ? p.request : null) as Record<string, unknown> | null,
     version: versionFromUrl(p.url),
     priority: 1,
+    owner: { kind: 'payload' as const, id: p.id, project: p.project },
     lastStatus: p.status,
     lastResponse: p.response,
   }));
@@ -59,12 +62,14 @@ export const stockPointSetItems = (sets: StockPointSet[]): ReplayItem[] =>
     path: '/endpoints',
     body: { endpoint: ep },
     priority: 0,
+    owner: { kind: 'set' as const, id: s.id, project: s.project },
     lastStatus: s.pushResults?.[ep.id]?.status ?? undefined,
     lastResponse: s.pushResults?.[ep.id]?.message,
   })));
 
 export const orderBatchItems = (batches: OrderBatch[]): ReplayItem[] =>
   batches.flatMap(b => b.packages.flatMap(pkg => {
+    const owner = { kind: 'batch' as const, id: b.id, project: b.project };
     const parentId = pkg.parent.parent_order.id;
     const parentResult = b.pushResults?.[`parent:${parentId}`];
     return [
@@ -77,6 +82,7 @@ export const orderBatchItems = (batches: OrderBatch[]): ReplayItem[] =>
         body: pkg.parent,
         version: 'v4' as OnestockApiVersion,
         priority: 2,
+        owner,
         lastStatus: parentResult?.status ?? undefined,
         lastResponse: parentResult?.message,
       },
@@ -90,6 +96,7 @@ export const orderBatchItems = (batches: OrderBatch[]): ReplayItem[] =>
           path: '/orders',
           body: o,
           priority: 3,
+          owner,
           lastStatus: r?.status ?? undefined,
           lastResponse: r?.message,
         };
