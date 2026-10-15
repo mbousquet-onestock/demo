@@ -5,7 +5,6 @@ import ImageModal from './ImageModal';
 import EditAssetModal from './EditAssetModal';
 import ProductEditModal from './ProductEditModal';
 import { RegenerateIdsDrawer, ItemsPushDrawer, SavedItemsPicker } from './ProductApiTools';
-import { buildItemsPayload } from '../utils/payloadUtils';
 import ProductCaptureDrawer from './ProductCaptureDrawer';
 import HostImagesButton from './HostImagesButton';
 import { getLastProject } from '../services/payloadStore';
@@ -21,7 +20,6 @@ interface StepResultsProps {
   selectedIds: Set<string>;
   onSelectionChange: (ids: Set<string>) => void;
   onCancel: () => void;
-  onGenerateJson: (selectedProducts: Product[]) => void;
   onUpdateProduct: (product: Product) => void;
   onAddProduct: (product: Product) => void;
   onDeleteProduct: (id: string) => void;
@@ -40,7 +38,6 @@ const StepResults: React.FC<StepResultsProps> = ({
   selectedIds,
   onSelectionChange,
   onCancel, 
-  onGenerateJson, 
   onUpdateProduct,
   onAddProduct,
   onDeleteProduct,
@@ -138,22 +135,6 @@ const StepResults: React.FC<StepResultsProps> = ({
     
     setIsMassEditOpen(false);
     setMassEditValue('');
-  };
-
-  const handleDownloadJson = () => {
-    const selected = products.filter(p => selectedIds.has(p.id));
-    if (selected.length === 0) {
-      return;
-    }
-
-    const jsonContent = JSON.stringify(buildItemsPayload(selected, settings), null, 4);
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(jsonContent);
-    const downloadAnchorNode = document.createElement('a');
-    downloadAnchorNode.setAttribute("href", dataStr);
-    downloadAnchorNode.setAttribute("download", `onestock_export_${Date.now()}.json`);
-    document.body.appendChild(downloadAnchorNode);
-    downloadAnchorNode.click();
-    downloadAnchorNode.remove();
   };
 
   const editableInputClass = "w-full bg-transparent border-none focus:ring-1 focus:ring-onestock-blue rounded px-1 py-0.5 text-inherit font-sans transition-all hover:bg-gray-50 focus:bg-white";
@@ -370,8 +351,6 @@ const StepResults: React.FC<StepResultsProps> = ({
                 {[
                   ['Mass edit', () => setIsMassEditOpen(true)],
                   ['Regenerate IDs', () => setIsRegenerateOpen(true)],
-                  ['Review JSON', () => onGenerateJson(products.filter(p => selectedIds.has(p.id)))],
-                  ['Download JSON', handleDownloadJson],
                 ].map(([label, run]) => (
                   <button key={label as string} onClick={run as () => void} className="px-2.5 py-1.5 text-[11px] font-bold text-gray-700 rounded-md hover:bg-white">
                     {label as string}
@@ -387,7 +366,7 @@ const StepResults: React.FC<StepResultsProps> = ({
                 <button onClick={() => onSelectionChange(new Set())} title="Clear the selection" className="px-2 py-1.5 text-[11px] text-gray-400 hover:text-gray-700">✕</button>
               </div>
             ) : (
-              <span className="text-[11px] text-gray-400">Select products to edit, regenerate IDs, export or push them.</span>
+              <span className="text-[11px] text-gray-400">Select products to edit, regenerate IDs or push them.</span>
             )}
           </div>
         )}

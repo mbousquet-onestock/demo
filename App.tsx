@@ -6,7 +6,6 @@ import Header from './components/Header';
 import StepResults from './components/StepResults';
 import Settings from './components/Settings';
 import StepStockUpdate from './components/StepStockUpdate';
-import StepJsonViewer from './components/StepJsonViewer';
 import StepOrderGeneration from './components/StepOrderGeneration';
 import StepApiExplorer from './components/StepApiExplorer';
 import StepApiLog from './components/StepApiLog';
@@ -24,7 +23,6 @@ const App: React.FC = () => {
   const [targetUrl, setTargetUrl] = useState('');
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [selectedProductsForJson, setSelectedProductsForJson] = useState<Product[]>([]);
   const [error, setError] = useState<string | null>(null);
   // Saved payload / project the Product Manager list was loaded from.
   const [productSource, setProductSource] = useState<{ label: string; project?: string } | null>(null);
@@ -87,11 +85,6 @@ const App: React.FC = () => {
   // Loads OneStock items (saved GET /items result or /items payload) into the Product Manager.
   const handleOpenItems = (items: any[], label: string, mode?: 'replace' | 'append', project?: string) =>
     handleLoadProducts(onestockItemsToProducts(items, settings.salesChannel), label, mode, project);
-
-  const handleGenerateJson = (selected: Product[]) => {
-    setSelectedProductsForJson(selected);
-    setCurrentStep(AppStep.JSON_VIEWER);
-  };
 
   const reset = () => {
     setProductSource(null);
@@ -162,7 +155,6 @@ const App: React.FC = () => {
                 selectedIds={selectedIds}
                 onSelectionChange={setSelectedIds}
                 onCancel={reset}
-                onGenerateJson={handleGenerateJson}
                 onUpdateProduct={handleUpdateProduct}
                 onAddProduct={handleAddProduct}
                 onDeleteProduct={handleDeleteProduct}
@@ -172,13 +164,6 @@ const App: React.FC = () => {
               />
             )}
 
-            {currentStep === AppStep.JSON_VIEWER && (
-              <StepJsonViewer 
-                selectedProducts={selectedProductsForJson}
-                settings={settings}
-                onBack={() => setCurrentStep(AppStep.RESULTS)}
-              />
-            )}
             
             {error && (
               <div className="mt-4 p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg flex flex-col gap-1 animate-in slide-in-from-top-2">
