@@ -46,7 +46,8 @@ export enum AppStep {
   API_EXPLORER = 'API_EXPLORER',
   API_LOG = 'API_LOG',
   STOCK_POINTS = 'STOCK_POINTS',
-  MANUAL_STEPS = 'MANUAL_STEPS'
+  MANUAL_STEPS = 'MANUAL_STEPS',
+  PROJECTS = 'PROJECTS'
 }
 
 export interface ProcessedSite {

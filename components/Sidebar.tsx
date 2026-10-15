@@ -32,6 +32,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   const apiMissing = missingTargetFields(apiTarget);
   const dbStatus = dbStatusStore.use();
   const steps = [
+    { id: AppStep.PROJECTS, label: 'Projects', icon: 'M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z' },
     { id: AppStep.HISTORY, label: 'Import History', icon: 'M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.25c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18c-2.305 0-4.408.867-6 2.292m0-14.25v14.25' },
     { id: AppStep.INPUT, label: 'Website Target', icon: 'M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244' },
     { id: AppStep.STOCK_POINTS, label: 'Stock Points', icon: 'M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z' },
@@ -51,7 +52,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     if (stepId === AppStep.STOCK_UPDATE) onGoToStock();
     if (stepId === AppStep.ORDER_GENERATION) onGoToOrders();
     if (stepId === AppStep.RESULTS) onGoToResults();
-    if (stepId === AppStep.API_EXPLORER || stepId === AppStep.API_LOG || stepId === AppStep.STOCK_POINTS || stepId === AppStep.MANUAL_STEPS) onNavigate(stepId);
+    if (stepId === AppStep.API_EXPLORER || stepId === AppStep.API_LOG || stepId === AppStep.STOCK_POINTS || stepId === AppStep.MANUAL_STEPS || stepId === AppStep.PROJECTS) onNavigate(stepId);
   };
 
   return (

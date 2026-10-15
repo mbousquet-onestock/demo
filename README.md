@@ -27,6 +27,9 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
 `npm run dev` / `npm run preview` serve the same proxy locally.
 
 - Only `*.onestock-retail.com` targets are allowed. Override with the `PROXY_ALLOWED_HOSTS` env var (comma-separated host suffixes).
+- **Projects**: everything saved per project (payloads, stock point sets, order batches, manual steps) and replay of
+  the API calls one by one or in bulk (selection by call, group or all; stock points first, parent orders before their
+  orders), with the request and the saved / replay result side by side.
 - **API Settings**: API URL (qualif / prod shortcuts), version, site ID and token (paste the token returned by
   `POST /login`). Every call uses them; payloads keep `{{site_id}}` / `{{token}}` variables, resolved at call time.
   "Test token" calls `GET /sales_channels`.
