@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Product, AppSettings, SavedPayload } from '../types';
 import { buildItemsPayload, regenerateProductIds, RegenerateIdsOptions, extractOnestockItems } from '../utils/payloadUtils';
 import { onestockRequest, useApiTarget, missingTargetFields, isProductionTarget, describeCallError, ProxyResponseEnvelope, SITE_ID_VAR, TOKEN_VAR } from '../services/onestockClient';
-import { savePayload, downloadJson, savedPayloadsStore, listProjects, getLastProject, setLastProject } from '../services/payloadStore';
+import { savePayload, downloadJson, savedPayloadsStore, listProjects, getLastProject, setLastProject, updateSavedPayload } from '../services/payloadStore';
 
 const labelClass = 'block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5';
 const inputClass = 'w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:border-onestock-blue';
@@ -258,7 +258,19 @@ interface ItemsCandidate {
   fromResult: boolean;
 }
 
+interface ProjectGroup {
+  project: string;
+  // Payloads holding items, loadable as they are.
+  loadable: ItemsCandidate[];
+  // Saved GET /items requests without items (request only, or empty result): runnable to fetch the items.
+  runnable: SavedPayload[];
+  // Other saved payloads of the project (other routes), only counted.
+  others: number;
+}
+
 const NO_PROJECT = '';
+
+const isGetItems = (p: SavedPayload) => p.method.toUpperCase() === 'GET' && p.path.split('?')[0] === '/items';
 
 // Items of several payloads, one per item id: the most recent payload wins.
 const mergeItems = (candidates: ItemsCandidate[]): any[] => {
@@ -272,30 +284,55 @@ const mergeItems = (candidates: ItemsCandidate[]): any[] => {
   return [...byId.values()];
 };
 
-// Saved payloads holding OneStock items (GET /items results, /items payloads), grouped by project.
+// Saved payloads of every project (API Explorer and Product Manager): those holding OneStock items are loaded
+// as they are; saved GET /items requests without result are run first.
 export const SavedItemsPicker: React.FC<SavedItemsPickerProps> = ({ hasProducts, onOpen, onClose }) => {
   const saved = savedPayloadsStore.use();
+  const target = useApiTarget();
+  const targetMissing = missingTargetFields(target);
   const [project, setProject] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [running, setRunning] = useState<string | null>(null);
+  const [runError, setRunError] = useState<{ id: string; message: string } | null>(null);
 
-  const candidates = useMemo<ItemsCandidate[]>(() => saved
-    .map(p => ({ payload: p, items: extractOnestockItems(p.response) || extractOnestockItems(p.request), fromResult: !!extractOnestockItems(p.response) }))
-    .filter((c): c is ItemsCandidate => !!c.items), [saved]);
-  const projects = listProjects(candidates.map(c => c.payload));
-
+  const projects = listProjects(saved);
   const q = search.trim().toLowerCase();
-  const visible = candidates.filter(({ payload }) =>
-    (project === null || (payload.project || NO_PROJECT) === project)
-    && (!q || payload.name.toLowerCase().includes(q) || (payload.project || '').toLowerCase().includes(q)));
 
-  const groups = useMemo(() => {
-    const map = new Map<string, ItemsCandidate[]>();
-    visible.forEach(c => {
-      const key = (c.payload.project || '').trim();
-      map.set(key, [...(map.get(key) || []), c]);
+  const groups = useMemo<ProjectGroup[]>(() => {
+    const map = new Map<string, ProjectGroup>();
+    saved.forEach(p => {
+      const key = (p.project || '').trim();
+      if (project !== null && key !== project) return;
+      if (q && !p.name.toLowerCase().includes(q) && !key.toLowerCase().includes(q)) return;
+      const group = map.get(key) || { project: key, loadable: [], runnable: [], others: 0 };
+      const items = extractOnestockItems(p.response) || extractOnestockItems(p.request);
+      if (items) group.loadable.push({ payload: p, items, fromResult: !!extractOnestockItems(p.response) });
+      else if (isGetItems(p)) group.runnable.push(p);
+      else group.others++;
+      map.set(key, group);
     });
-    return [...map.entries()].sort(([a], [b]) => (a === '' ? 1 : b === '' ? -1 : a.localeCompare(b)));
-  }, [visible]);
+    return [...map.values()].sort((a, b) => (a.project === '' ? 1 : b.project === '' ? -1 : a.project.localeCompare(b.project)));
+  }, [saved, project, q]);
+
+  // Runs a saved GET /items request ({{site_id}} / {{token}} from API Settings), keeps the result with the
+  // saved payload so it is directly loadable next time, then opens the items.
+  const runAndOpen = async (payload: SavedPayload, mode: 'replace' | 'append') => {
+    setRunning(payload.id);
+    setRunError(null);
+    try {
+      const body = (payload.request && typeof payload.request === 'object' ? payload.request : {}) as Record<string, unknown>;
+      const { url, envelope } = await onestockRequest({ method: 'GET', path: '/items', body });
+      if (!envelope.ok) throw new Error(describeCallError(envelope));
+      const items = extractOnestockItems(envelope.body);
+      updateSavedPayload(payload.id, { response: envelope.body, status: envelope.status, durationMs: envelope.durationMs, url });
+      if (!items) throw new Error('GET /items returned no item for this request.');
+      open(items, payload.name, mode, payload.project);
+    } catch (err: any) {
+      setRunError({ id: payload.id, message: err?.message || String(err) });
+    } finally {
+      setRunning(null);
+    }
+  };
 
   const open = (items: any[], label: string, mode: 'replace' | 'append', fromProject?: string) => {
     onOpen(items, label, mode, fromProject || undefined);
@@ -324,8 +361,8 @@ export const SavedItemsPicker: React.FC<SavedItemsPickerProps> = ({ hasProducts,
     <Drawer title="Load saved /items payloads" onClose={onClose} wide>
       <div className="space-y-4">
         <p className="text-sm text-gray-500">
-          Saved payloads containing OneStock items — <code>GET /items</code> results from the API Explorer and <code>/items</code> payloads
-          saved from the Product Manager — grouped by project. Load one payload, or a whole project (items merged by id, most recent payload first).
+          Projects of the API Explorer and the Product Manager. Payloads holding items (<code>GET /items</code> results, <code>/items</code> payloads)
+          load directly; a <code>GET /items</code> request saved without result is run first. A whole project merges its items by id, most recent payload first.
         </p>
         <div className="flex gap-2">
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or project…" className="flex-1 px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg outline-none" />
@@ -341,26 +378,31 @@ export const SavedItemsPicker: React.FC<SavedItemsPickerProps> = ({ hasProducts,
         </div>
         {groups.length === 0 ? (
           <p className="p-10 text-center text-sm text-gray-400 border border-dashed border-gray-200 rounded-xl">
-            No saved payload with items. Save a <code>GET /items</code> result in the API Explorer, or a payload from "Payload &amp; Push /items".
+            No saved payload. Save a <code>GET /items</code> request or result in the API Explorer, or a payload from "Payload &amp; Push /items".
           </p>
         ) : (
           <div className="space-y-4">
-            {groups.map(([groupProject, entries]) => {
-              const merged = mergeItems(entries);
-              const title = groupProject || 'No project';
+            {groups.map(group => {
+              const merged = mergeItems(group.loadable);
+              const title = group.project || 'No project';
+              const severalLoadable = !!group.project && group.loadable.length > 1;
               return (
-                <div key={groupProject || '__none__'} className="border border-gray-200 rounded-xl overflow-hidden">
+                <div key={group.project || '__none__'} className="border border-gray-200 rounded-xl overflow-hidden">
                   <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex flex-wrap items-center gap-2">
                     <span className="text-xs font-bold text-[#002D72] uppercase tracking-widest">{title}</span>
-                    <span className="text-[11px] text-gray-400">{entries.length} payload(s) · {merged.length} distinct item(s)</span>
-                    {groupProject && entries.length > 1 && (
+                    <span className="text-[11px] text-gray-400">
+                      {group.loadable.length} payload(s) with items · {merged.length} distinct item(s)
+                      {group.runnable.length > 0 && ` · ${group.runnable.length} GET /items request(s) to run`}
+                      {group.others > 0 && ` · ${group.others} other payload(s)`}
+                    </span>
+                    {severalLoadable && (
                       <div className="ml-auto flex gap-2">
-                        {loadButtons(merged, `all ${entries.length} /items payloads`, groupProject, true, true)}
+                        {loadButtons(merged, `all ${group.loadable.length} /items payloads`, group.project, true, true)}
                       </div>
                     )}
                   </div>
                   <ul className="divide-y divide-gray-100">
-                    {entries.map(({ payload, items, fromResult }) => (
+                    {group.loadable.map(({ payload, items, fromResult }) => (
                       <li key={payload.id} className="p-4 flex flex-wrap items-center gap-2">
                         <div className="min-w-0 flex-1">
                           <span className="font-bold text-sm text-gray-900">{payload.name}</span>
@@ -368,9 +410,36 @@ export const SavedItemsPicker: React.FC<SavedItemsPickerProps> = ({ hasProducts,
                             {payload.method} {payload.path} · {fromResult ? 'result' : 'request'} · {items.length} item(s) · {payload.source === 'products' ? 'Product Manager' : 'API Explorer'} · {new Date(payload.createdAt).toLocaleString()}
                           </p>
                         </div>
-                        {loadButtons(items, payload.name, payload.project, !(groupProject && entries.length > 1))}
+                        {loadButtons(items, payload.name, payload.project, !severalLoadable)}
                       </li>
                     ))}
+                    {group.runnable.map(payload => (
+                      <li key={payload.id} className="p-4 flex flex-wrap items-center gap-2">
+                        <div className="min-w-0 flex-1">
+                          <span className="font-bold text-sm text-gray-900">{payload.name}</span>
+                          <p className="text-[11px] text-gray-400 mt-0.5">
+                            GET /items · request saved without items · {payload.source === 'products' ? 'Product Manager' : 'API Explorer'} · {new Date(payload.createdAt).toLocaleString()}
+                          </p>
+                          {runError?.id === payload.id && <p className="text-[11px] text-red-600 mt-1 break-words">{runError.message}</p>}
+                          {targetMissing && <p className="text-[11px] text-amber-600 mt-1">Missing in API Settings: {targetMissing}</p>}
+                        </div>
+                        <button
+                          onClick={() => runAndOpen(payload, 'replace')}
+                          disabled={!!running || !!targetMissing}
+                          className="px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-40"
+                        >
+                          {running === payload.id ? 'Calling GET /items…' : hasProducts ? 'Run & replace list' : 'Run & open'}
+                        </button>
+                        {hasProducts && (
+                          <button onClick={() => runAndOpen(payload, 'append')} disabled={!!running || !!targetMissing} className="px-3 py-1.5 text-xs font-bold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-40">
+                            Run & add
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                    {group.loadable.length === 0 && group.runnable.length === 0 && (
+                      <li className="p-4 text-[11px] text-gray-400">No /items payload in this project ({group.others} payload(s) on other routes).</li>
+                    )}
                   </ul>
                 </div>
               );
