@@ -23,13 +23,13 @@ const json = (status: number, data: unknown) =>
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
   });
 
-const getDatabaseUrl = () => process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
+export const getDatabaseUrl = () => process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
 
-type Sql = ReturnType<typeof neon>;
+export type Sql = ReturnType<typeof neon>;
 let sqlClient: Sql | null = null;
 let schemaReady: Promise<unknown> | null = null;
 
-const getSql = async (): Promise<Sql> => {
+export const getSql = async (): Promise<Sql> => {
   if (!sqlClient) {
     // Local development against a Neon HTTP proxy, e.g. "http://db.localtest.me:4444/sql".
     const localEndpoint = process.env.NEON_FETCH_ENDPOINT;
@@ -51,7 +51,7 @@ const getSql = async (): Promise<Sql> => {
   return sql;
 };
 
-const isAuthorized = (request: Request): boolean => {
+export const isAuthorized = (request: Request): boolean => {
   const expected = process.env.APP_ACCESS_KEY || '';
   const given = request.headers.get('x-app-key') || '';
   if (!expected || given.length !== expected.length) return false;

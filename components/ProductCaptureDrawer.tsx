@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CapturedProduct, Product } from '../types';
 import { Drawer } from './ProductApiTools';
+import HostImagesButton from './HostImagesButton';
+import { capturedImageUrls, replaceCapturedImages } from '../services/imageHosting';
 import { captureInboxStore, productCapturesStore } from '../services/appStores';
 import { savedPayloadsStore, listProjects, getLastProject, setLastProject, downloadJson } from '../services/payloadStore';
 import { buildBookmarklet, parseCaptureInput, capturedToProducts, mergeCaptured } from '../utils/productCapture';
@@ -209,6 +211,14 @@ const ProductCaptureDrawer: React.FC<Props> = ({ defaultCurrency, onAdd, onClose
               <div className="flex flex-wrap gap-2">
                 <button onClick={() => add('append')} className="px-4 py-2 text-xs font-bold text-white bg-[#002D72] rounded-lg hover:bg-[#001F4D]">Add to Product Manager</button>
                 <button onClick={() => add('replace')} className="px-3 py-2 text-xs font-bold text-[#002D72] border border-[#002D72]/30 rounded-lg hover:bg-blue-50">Replace the Product Manager list</button>
+                <HostImagesButton
+                  urls={capturedImageUrls(target)}
+                  onDone={map => {
+                    captureInboxStore.set(prev => replaceCapturedImages(prev, map));
+                    productCapturesStore.set(prev => prev.map(c => ({ ...c, products: replaceCapturedImages(c.products, map) })));
+                  }}
+                  className="px-3 py-2 text-xs font-bold text-[#002D72] border border-[#002D72]/30 rounded-lg hover:bg-blue-50 disabled:opacity-40"
+                />
                 <button onClick={() => downloadJson({ products: target }, `capture_${Date.now()}.json`)} className="px-3 py-2 text-xs font-bold text-gray-600 border border-gray-300 rounded-lg hover:bg-white">Download JSON</button>
                 {selectedProducts.length > 0 && <button onClick={remove} className="px-3 py-2 text-xs font-bold text-red-600 border border-red-200 rounded-lg hover:bg-red-50">Remove</button>}
               </div>

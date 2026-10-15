@@ -7,6 +7,8 @@ import ProductEditModal from './ProductEditModal';
 import { RegenerateIdsDrawer, ItemsPushDrawer, SavedItemsPicker } from './ProductApiTools';
 import { buildItemsPayload } from '../utils/payloadUtils';
 import ProductCaptureDrawer from './ProductCaptureDrawer';
+import HostImagesButton from './HostImagesButton';
+import { productImageUrls, replaceProductImages } from '../services/imageHosting';
 import { captureDrawerRequest } from '../services/captureService';
 import { captureInboxStore } from '../services/appStores';
 
@@ -314,6 +316,16 @@ const StepResults: React.FC<StepResultsProps> = ({
               className="w-full pl-10 pr-4 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:ring-1 focus:ring-onestock-blue focus:bg-white outline-none transition-all"
             />
           </div>
+
+          {(() => {
+            const scope = selectedIds.size ? products.filter(p => selectedIds.has(p.id)) : products;
+            return (
+              <HostImagesButton
+                urls={productImageUrls(scope)}
+                onDone={map => replaceProductImages(scope, map).forEach(onUpdateProduct)}
+              />
+            );
+          })()}
 
           <button 
             onClick={() => setIsCaptureOpen(true)}

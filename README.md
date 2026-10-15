@@ -59,6 +59,11 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
   data (schema.org JSON-LD / microdata, OpenGraph) plus specification tables, gallery images and description; the page
   source can also be pasted. Captures (images as URLs, description, characteristics, variants with EAN / price) are
   saved per project in the database (`product_captures`) and become Product Manager articles (one per variant).
+  **Copy images to database** (Product Manager and capture panel): the images are downloaded by the server (public
+  hosts only, 4 MB max; the browser retries when the host refuses the server), stored in the `app_images` table and
+  served publicly at `https://<app>/img/<sha256>.<ext>`; the product image URLs (`image`, `images_big`) used by the
+  `PATCH /items` payload are replaced by these URLs. The app domain must be publicly reachable by OneStock (no Vercel
+  deployment protection on that domain).
 
 ## Database (Vercel Postgres / Neon)
 

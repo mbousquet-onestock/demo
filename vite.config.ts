@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react';
 import { handleProxyRequest } from './api/_proxyCore';
 import { handleDataRequest } from './api/_dataCore';
 import { handleAiRequest } from './api/_aiCore';
+import { handleImageRequest } from './api/_imageCore';
 
 // Serves the /api functions during `vite dev` / `vite preview` with the same logic as on Vercel.
 const apiMiddleware = (route: string, handler: (request: Request) => Promise<Response>) => async (req: any, res: any) => {
@@ -21,7 +22,7 @@ const apiMiddleware = (route: string, handler: (request: Request) => Promise<Res
     const response = await handler(request);
     res.statusCode = response.status;
     response.headers.forEach((value, key) => res.setHeader(key, value));
-    res.end(await response.text());
+    res.end(Buffer.from(await response.arrayBuffer()));
   } catch (err: any) {
     res.statusCode = 500;
     res.setHeader('Content-Type', 'application/json');
@@ -33,6 +34,12 @@ const mountApi = (middlewares: any) => {
   middlewares.use('/api/proxy', apiMiddleware('/api/proxy', handleProxyRequest));
   middlewares.use('/api/data', apiMiddleware('/api/data', handleDataRequest));
   middlewares.use('/api/ai', apiMiddleware('/api/ai', handleAiRequest));
+  middlewares.use('/api/image', apiMiddleware('/api/image', handleImageRequest));
+  // Same as the Vercel rewrite /img/:file → /api/image?id=:file
+  middlewares.use('/img', (req: any, res: any) => {
+    req.url = `?id=${encodeURIComponent(req.url.replace(/^\//, '').split('?')[0])}`;
+    return apiMiddleware('/api/image', handleImageRequest)(req, res);
+  });
 };
 
 const onestockApiDevPlugin = (): Plugin => ({
