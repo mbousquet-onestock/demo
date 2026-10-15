@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import JSZip from 'jszip';
-import { Product, AppSettings } from '../types';
+import { Product, AppSettings, OrderBatch } from '../types';
 import {
   generateOrderPackages, generateCustomers, priceMissingArticles, validateConfig, incrementId, hasPrice,
   OrderGenerationConfig, OrderPackage, OrderStrategy, ORDER_STRATEGIES,
@@ -8,6 +8,10 @@ import {
 import { fetchSalesChannels } from '../services/salesChannelService';
 import { getAiStatus, AiStatus } from '../services/aiService';
 import { mergeIds } from '../utils/endpointUtils';
+import { orderBatchesStore } from '../services/appStores';
+import { savedPayloadsStore, listProjects, getLastProject, setLastProject } from '../services/payloadStore';
+import { useApiTarget, missingTargetFields, isProductionTarget } from '../services/onestockClient';
+import { pushOrderPackages, parentKey, orderKey, OrderPushResult } from '../services/orderPushService';
 import StockPointsPicker from './StockPointsPicker';
 
 interface StepOrderGenerationProps {
@@ -94,7 +98,19 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
   const [progress, setProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
-  const [packages, setPackages] = useState<OrderPackage[] | null>(null);
+  // Current batch (generated or reopened); `dirty` until saved.
+  const [batch, setBatch] = useState<OrderBatch | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const packages: OrderPackage[] | null = batch?.packages || null;
+  const batches = orderBatchesStore.use();
+  const savedPayloads = savedPayloadsStore.use();
+  const projects = useMemo(() => listProjects([...savedPayloads, ...batches]), [savedPayloads, batches]);
+  const [batchProjectFilter, setBatchProjectFilter] = useState('');
+  const target = useApiTarget();
+  const targetMissing = missingTargetFields(target);
+  const [createParents, setCreateParents] = useState(true);
+  const [pushing, setPushing] = useState<string | null>(null);
+  const [pushNotice, setPushNotice] = useState<string | null>(null);
   const [openPackage, setOpenPackage] = useState<number | null>(0);
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
   const [isZipping, setIsZipping] = useState(false);
@@ -190,7 +206,17 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
       }
 
       const result = generateOrderPackages(fullConfig, products, customers, prices);
-      setPackages(result);
+      const now = new Date().toISOString();
+      setBatch({
+        id: Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
+        name: `Orders ${new Date().toLocaleString()}`,
+        project: getLastProject() || undefined,
+        createdAt: now,
+        updatedAt: now,
+        packages: result,
+      });
+      setDirty(true);
+      setPushNotice(null);
       setOpenPackage(0);
       const subCount = result.reduce((n, p) => n + p.subOrders.length, 0);
       // Next batch continues the numbering.
@@ -203,6 +229,70 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
       setProgress(null);
     }
   };
+
+  const updateBatch = (patch: Partial<OrderBatch>) => {
+    setBatch(prev => (prev ? { ...prev, ...patch } : prev));
+    setDirty(true);
+  };
+
+  const saveBatch = (toSave: OrderBatch | null = batch) => {
+    if (!toSave) return null;
+    const saved = { ...toSave, name: toSave.name.trim() || `Orders ${new Date().toLocaleString()}`, updatedAt: new Date().toISOString() };
+    orderBatchesStore.set(prev => [saved, ...prev.filter(b => b.id !== saved.id)]);
+    if (saved.project) setLastProject(saved.project);
+    setBatch(saved);
+    setDirty(false);
+    return saved;
+  };
+
+  const openBatch = (b: OrderBatch) => {
+    if (dirty && !window.confirm('Discard the unsaved generated orders?')) return;
+    setBatch(b);
+    setDirty(false);
+    setOpenPackage(0);
+    setPushNotice(null);
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+  };
+
+  const deleteBatch = (b: OrderBatch) => {
+    if (!window.confirm(`Delete the saved batch "${b.name}"? (Orders already created in OneStock are not deleted.)`)) return;
+    orderBatchesStore.set(prev => prev.filter(x => x.id !== b.id));
+    if (batch?.id === b.id) { setBatch(null); setDirty(false); }
+  };
+
+  const results: Record<string, OrderPushResult> = batch?.pushResults || {};
+  const subOrderIds = packages ? packages.flatMap(p => p.subOrders.map(o => o.order.id)) : [];
+  const createdCount = subOrderIds.filter(id => results[orderKey(id)]?.ok).length;
+  const failedCount = subOrderIds.filter(id => results[orderKey(id)] && !results[orderKey(id)].ok).length;
+
+  const pushOrders = async (onlyRemaining: boolean) => {
+    if (!batch || targetMissing) return;
+    const remaining = subOrderIds.length - (onlyRemaining ? createdCount : 0);
+    if (isProductionTarget(target) && !window.confirm(`Create ${remaining} order(s) on ${target.baseUrl} (site ${target.siteId})? This is not a qualification URL.`)) return;
+    setPushing('Creating…');
+    setPushNotice(null);
+    const base = batch;
+    try {
+      const pushed = await pushOrderPackages(base.packages, { createParents, previous: onlyRemaining ? base.pushResults : undefined },
+        (partial, done, total) => {
+          setPushing(`Creating ${done} / ${total}…`);
+          setBatch(prev => (prev ? { ...prev, pushResults: { ...(base.pushResults || {}), ...partial } } : prev));
+        });
+      // Results are kept with the saved batch.
+      saveBatch({ ...base, pushResults: { ...(base.pushResults || {}), ...pushed } });
+      const all = { ...(base.pushResults || {}), ...pushed };
+      const ok = subOrderIds.filter(id => all[orderKey(id)]?.ok).length;
+      setPushNotice(ok === subOrderIds.length
+        ? `${ok} order(s) created in OneStock.`
+        : `${ok} / ${subOrderIds.length} order(s) created — see the statuses below and API Logs.`);
+    } finally {
+      setPushing(null);
+    }
+  };
+
+  const statusBadge = (r?: OrderPushResult) => r
+    ? <span title={r.message} className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${r.ok ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{r.ok ? 'Created' : `Error ${r.status ?? ''}`}</span>
+    : null;
 
   const handleCopy = (content: any, label: string) => {
     navigator.clipboard.writeText(JSON.stringify(content, null, 4));
@@ -245,142 +335,180 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
         />
       )}
 
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 space-y-6">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-          <div>
-            <div className="flex items-center gap-3 flex-wrap">
-              <h2 className="text-2xl font-bold text-[#002D72]">Customer Order Generation</h2>
-              <span className="text-[10px] font-bold text-onestock-blue bg-blue-50 px-2 py-0.5 rounded-full uppercase tracking-widest border border-blue-100">{products.length} items selected</span>
-              {missingPrices > 0 && <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full uppercase tracking-widest border border-amber-100">{missingPrices} without price</span>}
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-2">
+        <div>
+          <h2 className="text-2xl font-bold text-[#002D72]">Customer Order Generation</h2>
+          <p className="text-sm text-gray-500 mt-1">Configure, generate, review, then create the orders in OneStock.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <span className="text-[10px] font-bold text-onestock-blue bg-blue-50 px-2 py-1 rounded-full uppercase tracking-widest border border-blue-100">{products.length} item(s) selected</span>
+          {missingPrices > 0 && <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-1 rounded-full uppercase tracking-widest border border-amber-100">{missingPrices} without price</span>}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-6 items-start">
+        <div className="space-y-4">
+          {/* 1. What */}
+          <section className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 space-y-5">
+            <h3 className="text-sm font-bold text-[#002D72]"><span className="inline-flex w-6 h-6 rounded-full bg-[#002D72] text-white text-xs items-center justify-center mr-2">1</span>Orders</h3>
+            <div>
+              <label className={labelClass}>Strategies (one drawn per sub-order)</label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {ORDER_STRATEGIES.map(s => {
+                  const active = config.strategies.includes(s);
+                  return (
+                    <button key={s} onClick={() => toggleStrategy(s)} className={`px-4 py-3 rounded-xl border text-left transition-all ${active ? 'bg-[#002D72] border-[#002D72] text-white shadow-sm' : 'bg-white border-gray-200 text-gray-500 hover:border-blue-200'}`}>
+                      <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider">
+                        <span className={`w-4 h-4 rounded border flex items-center justify-center text-[10px] ${active ? 'bg-white text-[#002D72] border-white' : 'border-gray-300'}`}>{active ? '✓' : ''}</span>
+                        {s}
+                      </span>
+                      <span className={`block text-[11px] mt-0.5 ${active ? 'text-white/70' : 'text-gray-400'}`}>{STRATEGY_LABELS[s]}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-            <p className="text-sm text-gray-500 mt-1">Parent orders with their sub-orders, customers generated with ChatGPT, payloads ready for OneStock.</p>
-          </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div>
+                <label className={labelClass}>Orders</label>
+                <input type="number" min={1} max={200} value={config.orderCount} onChange={e => set({ orderCount: Math.max(1, Math.min(200, parseInt(e.target.value) || 1)) })} className={inputClass} />
+              </div>
+              <NumberRange label="Sub-orders / order" min={config.subOrdersMin} max={config.subOrdersMax} onChange={(a, b) => set({ subOrdersMin: a, subOrdersMax: b })} limit={20} />
+              <NumberRange label="Items / sub-order" min={config.itemsMin} max={config.itemsMax} onChange={(a, b) => set({ itemsMin: a, itemsMax: b })} limit={50} />
+              <NumberRange label="Quantity / item" min={config.qtyMin} max={config.qtyMax} onChange={(a, b) => set({ qtyMin: a, qtyMax: b })} />
+            </div>
+          </section>
+
+          {/* 2. Where */}
+          <section className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 space-y-5">
+            <h3 className="text-sm font-bold text-[#002D72]"><span className="inline-flex w-6 h-6 rounded-full bg-[#002D72] text-white text-xs items-center justify-center mr-2">2</span>Market</h3>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">Destination country</label>
+                  <div className="flex gap-3">
+                    <button onClick={() => setShowAddCountry(v => !v)} className="text-[10px] font-bold text-onestock-blue hover:underline">{showAddCountry ? 'Cancel' : '+ Add'}</button>
+                    {country && settings.deliveryCountries.length > 1 && <button onClick={removeCountry} className="text-[10px] font-bold text-red-500 hover:underline">Remove</button>}
+                  </div>
+                </div>
+                <select value={config.countryCode} onChange={e => set({ countryCode: e.target.value })} className={inputClass}>
+                  {settings.deliveryCountries.map(c => <option key={c.code} value={c.code}>{c.code} — {c.name}{c.currency ? ` (${c.currency})` : ''}</option>)}
+                </select>
+                {showAddCountry && (
+                  <div className="flex gap-2 mt-2 p-3 bg-gray-50 rounded-lg border border-gray-100">
+                    <input value={newCountry.code} onChange={e => setNewCountry({ ...newCountry, code: e.target.value.toUpperCase().slice(0, 2) })} placeholder="DE" className={inputClass + ' w-16'} title="ISO code" />
+                    <input value={newCountry.name} onChange={e => setNewCountry({ ...newCountry, name: e.target.value })} placeholder="Germany" className={inputClass} />
+                    <input value={newCountry.currency} onChange={e => setNewCountry({ ...newCountry, currency: e.target.value.toUpperCase().slice(0, 3) })} placeholder="EUR" className={inputClass + ' w-20'} title="Currency" />
+                    <button onClick={addCountry} disabled={!/^[A-Za-z]{2}$/.test(newCountry.code) || !newCountry.name.trim()} className="px-3 py-2 bg-onestock-blue text-white font-bold text-xs rounded-lg disabled:opacity-40">Add</button>
+                  </div>
+                )}
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">Sales channel</label>
+                  <button onClick={loadChannels} disabled={loadingChannels} className="text-[10px] font-bold text-onestock-blue hover:underline disabled:opacity-50">{loadingChannels ? 'Loading…' : '↻ Reload from OneStock'}</button>
+                </div>
+                <select value={config.salesChannel} onChange={e => set({ salesChannel: e.target.value })} className={inputClass}>
+                  <option value="">{channels.length ? `Random among the ${channels.length} channel(s)` : '— no sales channel loaded —'}</option>
+                  {channels.map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.id}{c.description || c.name ? ` — ${c.description || c.name}` : ''}{c.currency ? ` (${c.currency})` : ''}
+                    </option>
+                  ))}
+                </select>
+                {channelsError && <p className="text-[11px] text-red-600 mt-1 break-words">{channelsError}</p>}
+              </div>
+            </div>
+
+            {needsPoints && (
+              <div className="pt-4 border-t border-gray-100 space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">Collection points for CKC / ROPIS ({deliveryPoints.length})</label>
+                  <div className="ml-auto flex flex-wrap gap-2">
+                    <input value={newPoint} onChange={e => setNewPoint(e.target.value)} onKeyDown={e => e.key === 'Enter' && addPoint()} placeholder="Endpoint id…" className="w-36 px-3 py-1.5 text-xs bg-gray-50 border border-gray-200 rounded-lg outline-none" />
+                    <button onClick={addPoint} className="px-3 py-1.5 text-xs font-bold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">Add</button>
+                    <button onClick={() => setPoints(mergeIds(deliveryPoints, settings.stockEndpoints))} disabled={settings.stockEndpoints.length === 0} className="px-3 py-1.5 text-xs font-bold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-40" title="Stock points of the Stock Manager">+ Stock Manager</button>
+                    <button onClick={() => setIsPickerOpen(true)} className="px-3 py-1.5 text-xs font-bold text-white bg-onestock-blue rounded-lg hover:bg-[#001F4D]">Load stock points</button>
+                    {deliveryPoints.length > 0 && <button onClick={() => setPoints([])} className="px-3 py-1.5 text-xs font-bold text-red-600 border border-red-200 rounded-lg hover:bg-red-50">Clear</button>}
+                  </div>
+                </div>
+                {deliveryPoints.length === 0
+                  ? <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg p-2">Add at least one collection point — one is drawn per CKC / ROPIS sub-order.</p>
+                  : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {deliveryPoints.map(ep => (
+                        <span key={ep} className="bg-blue-50 border border-blue-100 pl-2.5 pr-1.5 py-1 rounded-lg flex items-center gap-1.5">
+                          <span className="text-[11px] font-mono font-bold text-onestock-blue">{ep}</span>
+                          <button onClick={() => setPoints(deliveryPoints.filter(p => p !== ep))} className="text-blue-300 hover:text-red-500">✕</button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+              </div>
+            )}
+          </section>
+
+          {/* 3. Ids & data */}
+          <section className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 space-y-5">
+            <h3 className="text-sm font-bold text-[#002D72]"><span className="inline-flex w-6 h-6 rounded-full bg-[#002D72] text-white text-xs items-center justify-center mr-2">3</span>Ids & customer data</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <label className={labelClass}>First parent order id</label>
+                <input value={config.parentOrderId} onChange={e => set({ parentOrderId: e.target.value })} className={inputClass + ' font-mono'} />
+              </div>
+              <div>
+                <label className={labelClass}>Sub-order prefix ({'{TYPE}'} = strategy)</label>
+                <input value={config.orderIdPrefix} onChange={e => set({ orderIdPrefix: e.target.value })} className={inputClass + ' font-mono'} />
+              </div>
+              <div>
+                <label className={labelClass}>Next sub-order number</label>
+                <input type="number" min={0} value={config.startIndex} onChange={e => set({ startIndex: parseInt(e.target.value) || 0 })} className={inputClass + ' font-mono'} />
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 p-3 bg-gray-50 rounded-lg border border-gray-100">
+              <span className="text-xs font-bold text-gray-600">ChatGPT {aiAvailable ? '' : <span className="text-amber-600 font-normal">— no key in API Settings, sample data will be used</span>}</span>
+              <label className="flex items-center gap-2 text-xs text-gray-700"><input type="checkbox" checked={aiCustomers} disabled={!aiAvailable} onChange={e => setAiCustomers(e.target.checked)} /> Customers & addresses</label>
+              {missingPrices > 0
+                ? <label className="flex items-center gap-2 text-xs text-gray-700"><input type="checkbox" checked={aiPrices} disabled={!aiAvailable} onChange={e => setAiPrices(e.target.checked)} /> Prices of the {missingPrices} article(s) without price</label>
+                : <span className="text-xs text-gray-400">All selected articles have a price</span>}
+            </div>
+          </section>
+        </div>
+
+        {/* Summary */}
+        <aside className="xl:sticky xl:top-4 bg-white rounded-2xl border border-gray-200 shadow-sm p-6 space-y-4">
+          <h3 className="text-sm font-bold text-[#002D72] uppercase tracking-widest">Summary</h3>
+          <dl className="text-xs space-y-2">
+            {[
+              ['Strategies', config.strategies.length ? config.strategies.map(s => s.toUpperCase()).join(', ') : '—'],
+              ['Orders', `${config.orderCount} parent order(s)`],
+              ['Sub-orders', `${config.orderCount * config.subOrdersMin}${config.subOrdersMax !== config.subOrdersMin ? ` – ${config.orderCount * config.subOrdersMax}` : ''}`],
+              ['Lines / sub-order', `${config.itemsMin}${config.itemsMax !== config.itemsMin ? `–${config.itemsMax}` : ''} item(s) × ${config.qtyMin}${config.qtyMax !== config.qtyMin ? `–${config.qtyMax}` : ''}`],
+              ['Country', country ? `${country.code} — ${country.name}` : config.countryCode],
+              ['Sales channel', config.salesChannel || (channels.length ? 'random' : '—')],
+              ['Currency', config.salesChannel ? currency : `per channel (default ${currency})`],
+              ...(needsPoints ? [['Collection points', `${deliveryPoints.length}`]] : []),
+              ['Customers', aiAvailable && aiCustomers ? 'ChatGPT' : 'sample data'],
+              ['Parent ids', config.orderCount > 1 ? `${config.parentOrderId} → …${incrementId(config.parentOrderId, config.orderCount - 1).slice(-4)}` : config.parentOrderId],
+              ['First sub-order', previewId],
+            ].map(([k, v]) => (
+              <div key={k} className="flex justify-between gap-3">
+                <dt className="text-gray-400 shrink-0">{k}</dt>
+                <dd className="font-bold text-gray-800 text-right break-words min-w-0">{v}</dd>
+              </div>
+            ))}
+          </dl>
           <button
             onClick={handleGenerate}
             disabled={!!progress || products.length === 0}
-            className="px-6 py-2.5 bg-[#002D72] text-white font-bold rounded-lg hover:bg-[#001F4D] shadow-lg text-sm disabled:opacity-50"
+            className="w-full py-3 bg-[#002D72] text-white font-bold rounded-xl hover:bg-[#001F4D] shadow-lg text-sm disabled:opacity-50"
           >
             {progress || `Generate ${config.orderCount} order(s)`}
           </button>
-        </div>
-        {error && <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">{error}</p>}
-        {warning && <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3">{warning}</p>}
-
-        {/* Strategies */}
-        <div className="p-5 bg-gray-50 rounded-xl border border-gray-100 space-y-3">
-          <label className={labelClass}>Order strategies to apply (one is drawn per sub-order)</label>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-            {ORDER_STRATEGIES.map(s => {
-              const active = config.strategies.includes(s);
-              return (
-                <button key={s} onClick={() => toggleStrategy(s)} className={`px-4 py-3 rounded-lg border text-left transition-all ${active ? 'bg-[#002D72] border-[#002D72] text-white' : 'bg-white border-gray-200 text-gray-500 hover:border-blue-200'}`}>
-                  <span className="text-xs font-bold uppercase tracking-wider">{active ? '☑' : '☐'} {s}</span>
-                  <span className={`block text-[11px] ${active ? 'text-white/70' : 'text-gray-400'}`}>{STRATEGY_LABELS[s]}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Volumes */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 p-5 bg-gray-50 rounded-xl border border-gray-100">
-          <div>
-            <label className={labelClass}>Orders to generate</label>
-            <input type="number" min={1} max={200} value={config.orderCount} onChange={e => set({ orderCount: Math.max(1, Math.min(200, parseInt(e.target.value) || 1)) })} className={inputClass} />
-          </div>
-          <NumberRange label="Sub-orders per order (batch order count)" min={config.subOrdersMin} max={config.subOrdersMax} onChange={(a, b) => set({ subOrdersMin: a, subOrdersMax: b })} limit={20} />
-          <NumberRange label="Items per sub-order" min={config.itemsMin} max={config.itemsMax} onChange={(a, b) => set({ itemsMin: a, itemsMax: b })} limit={50} />
-          <NumberRange label="Quantity per item" min={config.qtyMin} max={config.qtyMax} onChange={(a, b) => set({ qtyMin: a, qtyMax: b })} />
-        </div>
-
-        {/* Market */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 p-5 bg-gray-50 rounded-xl border border-gray-100">
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">Destination country</label>
-              <div className="flex gap-3">
-                <button onClick={() => setShowAddCountry(v => !v)} className="text-[10px] font-bold text-onestock-blue hover:underline">{showAddCountry ? 'Cancel' : '+ Add country'}</button>
-                {country && settings.deliveryCountries.length > 1 && <button onClick={removeCountry} className="text-[10px] font-bold text-red-500 hover:underline">Remove</button>}
-              </div>
-            </div>
-            <select value={config.countryCode} onChange={e => set({ countryCode: e.target.value })} className={inputClass}>
-              {settings.deliveryCountries.map(c => <option key={c.code} value={c.code}>{c.name} ({c.code}){c.currency ? ` · ${c.currency}` : ''}</option>)}
-            </select>
-            {showAddCountry && (
-              <div className="flex gap-2 mt-2">
-                <input value={newCountry.code} onChange={e => setNewCountry({ ...newCountry, code: e.target.value.toUpperCase().slice(0, 2) })} placeholder="DE" className={inputClass + ' w-16'} />
-                <input value={newCountry.name} onChange={e => setNewCountry({ ...newCountry, name: e.target.value })} placeholder="Germany" className={inputClass} />
-                <input value={newCountry.currency} onChange={e => setNewCountry({ ...newCountry, currency: e.target.value.toUpperCase().slice(0, 3) })} placeholder="EUR" className={inputClass + ' w-20'} title="Currency" />
-                <button onClick={addCountry} disabled={!/^[A-Za-z]{2}$/.test(newCountry.code) || !newCountry.name.trim()} className="px-3 py-2 bg-onestock-blue text-white font-bold text-xs rounded-lg disabled:opacity-40">Add</button>
-              </div>
-            )}
-          </div>
-
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">Sales channel (GET /sales_channels)</label>
-              <button onClick={loadChannels} disabled={loadingChannels} className="text-[10px] font-bold text-onestock-blue hover:underline disabled:opacity-50">{loadingChannels ? 'Loading…' : '↻ Reload from OneStock'}</button>
-            </div>
-            <select value={config.salesChannel} onChange={e => set({ salesChannel: e.target.value })} className={inputClass}>
-              <option value="">{channels.length ? `Random among the ${channels.length} channel(s)` : '— no sales channel loaded —'}</option>
-              {channels.map(c => <option key={c.id} value={c.id}>{c.name ? `${c.name} (${c.id})` : c.id}{c.currency ? ` · ${c.currency}` : ''}</option>)}
-            </select>
-            {channelsError && <p className="text-[11px] text-red-600 mt-1 break-words">{channelsError}</p>}
-            <p className="text-[11px] text-gray-400 mt-1">Order currency: <strong>{config.salesChannel ? currency : 'currency of the drawn sales channel'}</strong>{!config.salesChannel && ` (default ${currency})`}</p>
-          </div>
-        </div>
-
-        {/* Delivery points */}
-        {needsPoints && (
-          <div className="p-5 bg-gray-50 rounded-xl border border-gray-100 space-y-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">Delivery points for CKC / ROPIS ({deliveryPoints.length}) — one is drawn per sub-order</label>
-              <div className="ml-auto flex flex-wrap gap-2">
-                <input value={newPoint} onChange={e => setNewPoint(e.target.value)} onKeyDown={e => e.key === 'Enter' && addPoint()} placeholder="Endpoint id…" className="w-40 px-3 py-1.5 text-xs bg-white border border-gray-200 rounded-lg outline-none" />
-                <button onClick={addPoint} className="px-3 py-1.5 text-xs font-bold text-gray-600 border border-gray-300 rounded-lg hover:bg-white">Add</button>
-                <button onClick={() => setPoints(mergeIds(deliveryPoints, settings.stockEndpoints))} disabled={settings.stockEndpoints.length === 0} className="px-3 py-1.5 text-xs font-bold text-gray-600 border border-gray-300 rounded-lg hover:bg-white disabled:opacity-40" title="Stock points of the Stock Manager">+ Stock Manager points</button>
-                <button onClick={() => setIsPickerOpen(true)} className="px-3 py-1.5 text-xs font-bold text-white bg-onestock-blue rounded-lg hover:bg-[#001F4D]">Load stock points</button>
-                {deliveryPoints.length > 0 && <button onClick={() => setPoints([])} className="px-3 py-1.5 text-xs font-bold text-red-600 border border-red-200 rounded-lg hover:bg-red-50">Clear</button>}
-              </div>
-            </div>
-            {deliveryPoints.length === 0
-              ? <p className="text-xs text-amber-700">Add at least one delivery point.</p>
-              : (
-                <div className="flex flex-wrap gap-1.5">
-                  {deliveryPoints.map(ep => (
-                    <span key={ep} className="bg-white border border-blue-100 pl-2.5 pr-1.5 py-1 rounded-lg flex items-center gap-1.5">
-                      <span className="text-[11px] font-mono font-bold text-onestock-blue">{ep}</span>
-                      <button onClick={() => setPoints(deliveryPoints.filter(p => p !== ep))} className="text-blue-300 hover:text-red-500">✕</button>
-                    </span>
-                  ))}
-                </div>
-              )}
-          </div>
-        )}
-
-        {/* Ids + AI */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 p-5 bg-gray-50 rounded-xl border border-gray-100">
-          <div>
-            <label className={labelClass}>First parent order id (auto-incs)</label>
-            <input value={config.parentOrderId} onChange={e => set({ parentOrderId: e.target.value })} className={inputClass + ' font-mono border-l-4 border-l-green-500'} />
-          </div>
-          <div>
-            <label className={labelClass}>Sub-order id prefix ({'{TYPE}'} = strategy)</label>
-            <input value={config.orderIdPrefix} onChange={e => set({ orderIdPrefix: e.target.value })} className={inputClass + ' font-mono'} />
-          </div>
-          <div>
-            <label className={labelClass}>Sub-order counter (auto-incs)</label>
-            <input type="number" min={0} value={config.startIndex} onChange={e => set({ startIndex: parseInt(e.target.value) || 0 })} className={inputClass + ' font-mono border-l-4 border-l-green-500'} />
-          </div>
-          <div className="space-y-2">
-            <label className={labelClass}>ChatGPT {aiAvailable ? '' : '(no key in API Settings)'}</label>
-            <label className="flex items-center gap-2 text-xs text-gray-700"><input type="checkbox" checked={aiCustomers} disabled={!aiAvailable} onChange={e => setAiCustomers(e.target.checked)} /> Customers & addresses</label>
-            <label className="flex items-center gap-2 text-xs text-gray-700"><input type="checkbox" checked={aiPrices} disabled={!aiAvailable} onChange={e => setAiPrices(e.target.checked)} /> Prices of articles without price</label>
-          </div>
-          <p className="col-span-full text-xs text-onestock-blue">
-            Preview: parent <strong className="font-mono">{config.parentOrderId}</strong> · first sub-order <strong className="font-mono">{previewId}</strong>
-          </p>
-        </div>
+          {products.length === 0 && <p className="text-xs text-amber-700">Select articles in the Product Manager first.</p>}
+          {error && <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">{error}</p>}
+          {warning && <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3">{warning}</p>}
+        </aside>
       </div>
 
       {packages && (
@@ -395,24 +523,58 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
             </button>
           </div>
 
+          <datalist id="order-batch-projects">{projects.map(p => <option key={p} value={p} />)}</datalist>
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <input value={batch?.project || ''} onChange={e => updateBatch({ project: e.target.value || undefined })} list="order-batch-projects" placeholder="Project" className="w-44 px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg outline-none" />
+              <input value={batch?.name || ''} onChange={e => updateBatch({ name: e.target.value })} placeholder="Batch name" className="flex-1 min-w-[200px] px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg outline-none" />
+              <button onClick={() => { saveBatch(); setPushNotice('Batch saved.'); }} className="px-4 py-2 text-xs font-bold text-onestock-blue border border-onestock-blue rounded-lg hover:bg-blue-50">Save batch</button>
+              {dirty && <span className="text-[11px] font-bold text-amber-600">unsaved</span>}
+            </div>
+            <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-gray-100">
+              <span className="text-xs font-bold text-gray-600">Create in OneStock</span>
+              <label className="flex items-center gap-2 text-xs text-gray-600">
+                <input type="checkbox" checked={createParents} onChange={e => setCreateParents(e.target.checked)} />
+                Parent orders first (POST /parent_orders, v4)
+              </label>
+              <button onClick={() => pushOrders(false)} disabled={!!pushing || !!targetMissing} className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-40">
+                {pushing || `POST /orders (${subOrderIds.length})`}
+              </button>
+              {(failedCount > 0 || (createdCount > 0 && createdCount < subOrderIds.length)) && !pushing && (
+                <button onClick={() => pushOrders(true)} disabled={!!targetMissing} className="px-4 py-2 text-xs font-bold text-red-600 border border-red-200 rounded-lg hover:bg-red-50">
+                  Retry not created ({subOrderIds.length - createdCount})
+                </button>
+              )}
+              <span className="text-[11px] text-gray-500">
+                {createdCount} created · {failedCount} failed · {targetMissing ? <span className="text-red-600">Missing in API Settings: {targetMissing}</span> : <>target <strong>{target.siteId}</strong> · {target.baseUrl}</>}
+              </span>
+            </div>
+            {pushNotice && <p className="text-sm text-blue-900 bg-blue-50 border border-blue-100 rounded-lg p-3">{pushNotice}</p>}
+          </div>
+
           {packages.map((pkg, i) => {
             const isOpen = openPackage === i;
             return (
               <div key={pkg.parent.parent_order.id} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                 <button onClick={() => setOpenPackage(isOpen ? null : i)} className="w-full px-5 py-3 flex flex-wrap items-center gap-3 text-left hover:bg-gray-50">
                   <span className="font-mono font-bold text-sm text-[#002D72]">{pkg.parent.parent_order.id}</span>
+                  {statusBadge(results[parentKey(pkg.parent.parent_order.id)])}
+                  {pkg.subOrders.some(o => results[orderKey(o.order.id)]) && (
+                    <span className="text-[10px] font-bold text-gray-500">{pkg.subOrders.filter(o => results[orderKey(o.order.id)]?.ok).length}/{pkg.subOrders.length} sub-orders created</span>
+                  )}
                   <span className="text-xs text-gray-600">{pkg.customer.first_name} {pkg.customer.last_name} · {pkg.customer.address.zip_code} {pkg.customer.address.city}</span>
                   <span className="text-xs text-gray-400">{pkg.subOrders.map(o => o.order.id).join(', ')}</span>
                   <span className="ml-auto text-xs font-bold text-gray-700">{pkg.parent.parent_order.pricing_details.price} {pkg.parent.parent_order.pricing_details.currency}</span>
                 </button>
                 {isOpen && (
                   <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-gray-100 bg-gray-50">
-                    {[{ key: `p-${i}`, title: 'Parent order', body: pkg.parent }, ...pkg.subOrders.map((o, j) => ({ key: `s-${i}-${j}`, title: `${o.order.id} · ${o.order.types.join('+').toUpperCase()}${o.order.delivery.destination.endpoint_id ? ` @ ${o.order.delivery.destination.endpoint_id}` : ''}`, body: o }))].map(block => (
+                    {[{ key: `p-${i}`, title: 'Parent order', body: pkg.parent, result: results[parentKey(pkg.parent.parent_order.id)] }, ...pkg.subOrders.map((o, j) => ({ key: `s-${i}-${j}`, title: `${o.order.id} · ${o.order.types.join('+').toUpperCase()}${o.order.delivery.destination.endpoint_id ? ` @ ${o.order.delivery.destination.endpoint_id}` : ''}`, body: o, result: results[orderKey(o.order.id)] }))].map(block => (
                       <div key={block.key} className="bg-[#001F4D] rounded-xl overflow-hidden border border-white/10">
                         <div className="px-4 py-2 bg-white/5 border-b border-white/10 flex justify-between items-center">
-                          <span className="text-[10px] font-bold text-blue-300 uppercase tracking-widest">{block.title}</span>
+                          <span className="text-[10px] font-bold text-blue-300 uppercase tracking-widest flex items-center gap-2">{block.title} {statusBadge(block.result)}</span>
                           <button onClick={() => handleCopy(block.body, block.key)} className="text-[10px] font-bold text-white/40 hover:text-white">{copyStatus === block.key ? 'COPIED!' : 'COPY'}</button>
                         </div>
+                        {block.result && !block.result.ok && <p className="px-4 pt-3 text-[11px] text-red-300 break-words">{block.result.message}{block.result.requestId ? ` · Request-Id ${block.result.requestId}` : ''}</p>}
                         <pre className="p-4 max-h-60 overflow-y-auto text-[11px] font-mono text-blue-100">{JSON.stringify(block.body, null, 2)}</pre>
                       </div>
                     ))}
@@ -423,6 +585,41 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
           })}
         </div>
       )}
+
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+        <div className="p-4 flex flex-wrap items-center gap-3 border-b border-gray-100">
+          <h3 className="text-sm font-bold text-[#002D72] uppercase tracking-widest border-l-4 border-[#002D72] pl-3 flex-1">Saved order batches ({batches.length})</h3>
+          <select value={batchProjectFilter} onChange={e => setBatchProjectFilter(e.target.value)} className="px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg outline-none">
+            <option value="">All projects</option>
+            {listProjects(batches).map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </div>
+        {batches.filter(b => !batchProjectFilter || (b.project || '') === batchProjectFilter).length === 0 ? (
+          <p className="p-8 text-center text-sm text-gray-400">No saved batch yet.</p>
+        ) : (
+          <ul className="divide-y divide-gray-100">
+            {batches.filter(b => !batchProjectFilter || (b.project || '') === batchProjectFilter).map(b => {
+              const ids = b.packages.flatMap(p => p.subOrders.map(o => o.order.id));
+              const ok = ids.filter(id => b.pushResults?.[orderKey(id)]?.ok).length;
+              return (
+                <li key={b.id} className={`p-4 flex flex-wrap items-center gap-3 ${batch?.id === b.id ? 'bg-blue-50/50' : ''}`}>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {b.project && <span className="text-[9px] font-bold uppercase bg-blue-50 text-onestock-blue px-1.5 py-0.5 rounded">{b.project}</span>}
+                      <span className="font-bold text-sm text-gray-900">{b.name}</span>
+                    </div>
+                    <p className="text-[11px] text-gray-400 mt-0.5">
+                      {b.packages.length} parent(s) · {ids.length} sub-order(s) · {ok} created · updated {new Date(b.updatedAt).toLocaleString()}
+                    </p>
+                  </div>
+                  <button onClick={() => openBatch(b)} className="px-3 py-1.5 text-xs font-bold text-white bg-onestock-blue rounded-lg hover:bg-[#001F4D]">Open</button>
+                  <button onClick={() => deleteBatch(b)} className="px-3 py-1.5 text-xs font-bold text-red-600 border border-red-200 rounded-lg hover:bg-red-50">Delete</button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
     </div>
   );
 };

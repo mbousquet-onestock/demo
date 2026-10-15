@@ -39,6 +39,8 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
   item; strategies SFS / CKC / ROPIS drawn per sub-order; CKC / ROPIS collection points drawn from a list; sales
   channels loaded with `GET /sales_channels`; destination countries managed on the page; customers / addresses and
   prices of articles without price generated with ChatGPT (API Settings key), sample data otherwise.
+  Generated batches are saved under a project (synced to the database) and created in OneStock: parent orders with
+  `POST /parent_orders` (v4) then sub-orders with `POST /orders` (v3 / v4), status per order and retry of the failed ones.
 - **API Explorer**: all GET routes of the OneStock spec (`data/onestockGetEndpoints.json`, generated from the
   OpenAPI file). Requests / results are saved with a required name and an optional project, and listed by project.
   `GET /items` results can be opened in the Product Manager.

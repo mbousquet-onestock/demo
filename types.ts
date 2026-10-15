@@ -136,7 +136,7 @@ export interface AppSettings {
   orderSalesChannels: string[];
   deliveryCountries: { code: string; name: string; currency?: string }[];
   // Sales channels last loaded with GET /sales_channels (Order Generator).
-  salesChannelsCache?: { id: string; name?: string; currency?: string }[];
+  salesChannelsCache?: { id: string; name?: string; description?: string; currency?: string }[];
   // Collection points used for CKC / ROPIS generated orders.
   orderDeliveryPoints?: string[];
   rulesets: string[];
@@ -238,5 +238,18 @@ export interface StockPointSet {
   updatedAt: string;
   endpoints: StockPointDraft[];
   // Creation result per endpoint id (POST /endpoints).
+  pushResults?: Record<string, StockPointPushResult>;
+}
+
+// A generated batch of customer orders (Order Generator), saved under a project.
+export interface OrderBatch {
+  id: string;
+  name: string;
+  project?: string;
+  createdAt: string;
+  updatedAt: string;
+  // Parent order payload, sub-order payloads and customer, per generated order.
+  packages: { parent: any; subOrders: any[]; customer: any }[];
+  // Creation result per order, keyed "parent:<id>" / "order:<id>".
   pushResults?: Record<string, StockPointPushResult>;
 }
