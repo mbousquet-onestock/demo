@@ -15,7 +15,6 @@ interface SidebarProps {
   onGoToOrders: () => void;
   onGoToResults: () => void;
   onNavigate: (step: AppStep) => void;
-  hasProducts: boolean;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ 
@@ -28,7 +27,6 @@ const Sidebar: React.FC<SidebarProps> = ({
   onGoToOrders,
   onGoToResults,
   onNavigate,
-  hasProducts
 }) => {
   const apiTarget = useApiTarget();
   const apiMissing = missingTargetFields(apiTarget);
@@ -72,8 +70,8 @@ const Sidebar: React.FC<SidebarProps> = ({
         <ul className="space-y-2">
           {steps.map((step) => {
             const isActive = currentStep === step.id;
-            const needsProducts = [AppStep.STOCK_UPDATE, AppStep.ORDER_GENERATION].includes(step.id);
-            const isClickable = [AppStep.HISTORY, AppStep.INPUT, AppStep.SETTINGS, AppStep.RESULTS, AppStep.API_EXPLORER, AppStep.API_LOG, AppStep.STOCK_POINTS, AppStep.MANUAL_STEPS].includes(step.id) || (needsProducts && hasProducts);
+            // Every menu entry stays available, even without selected products.
+            const isClickable = true;
 
             return (
               <li key={step.id}>

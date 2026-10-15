@@ -185,7 +185,6 @@ const App: React.FC = () => {
         onGoToOrders={() => setCurrentStep(AppStep.ORDER_GENERATION)}
         onGoToResults={() => setCurrentStep(AppStep.RESULTS)}
         onNavigate={setCurrentStep}
-        hasProducts={products.length > 0}
       />
       
       <div className="flex-1 flex flex-col min-w-0">

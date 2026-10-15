@@ -321,6 +321,12 @@ const StepStockUpdate: React.FC<StepStockUpdateProps> = ({ products, settings, o
         <div>
           <h2 className="text-2xl font-bold text-[#002D72]">Inventory Management</h2>
           <p className="text-sm text-gray-500 mt-1">Assign stock quantities per <strong>Endpoint ID</strong> across {products.length} items.</p>
+          {products.length === 0 && (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mt-2 inline-flex items-center gap-2">
+              No article selected: the stock lines come from the articles selected in the Product Manager.
+              <button onClick={onCancel} className="font-bold underline">Open the Product Manager</button>
+            </p>
+          )}
         </div>
         
         <div className="flex flex-wrap items-center gap-3">

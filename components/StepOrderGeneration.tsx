@@ -77,7 +77,7 @@ const NumberRange: React.FC<{ label: string; min: number; max: number; onChange:
   </div>
 );
 
-const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, settings, onUpdateSettings }) => {
+const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, settings, onUpdateSettings, onCancel }) => {
   const [config, setConfig] = useState<StoredConfig>(() => loadConfig(settings));
   const set = (patch: Partial<StoredConfig>) => setConfig(prev => ({ ...prev, ...patch }));
   useEffect(() => {
@@ -573,7 +573,12 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
           >
             {progress || `Generate ${config.orderCount} order(s)`}
           </button>
-          {products.length === 0 && <p className="text-xs text-amber-700">Select articles in the Product Manager first.</p>}
+          {products.length === 0 && (
+            <p className="text-xs text-amber-700">
+              No article selected: orders are built from the articles selected in the Product Manager.{' '}
+              <button onClick={onCancel} className="font-bold underline">Open the Product Manager</button>
+            </p>
+          )}
           {error && <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">{error}</p>}
           {warning && <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3">{warning}</p>}
         </aside>
