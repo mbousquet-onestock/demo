@@ -61,6 +61,12 @@ const StepResults: React.FC<StepResultsProps> = ({
   const [isCaptureOpen, setIsCaptureOpen] = useState(captureRequest > 0 && captureInboxStore.get().length > 0);
   useEffect(() => { if (captureRequest > 0) setIsCaptureOpen(true); }, [captureRequest]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
+  const addOptions = [
+    { label: 'Load saved /items payloads', hint: 'A /items payload or a GET /items result saved in a project.', run: () => setIsSavedItemsOpen(true) },
+    { label: 'Capture from a website', hint: 'Product sheets of the client website, with images and variants.', run: () => setIsCaptureOpen(true) },
+    { label: 'Add a product manually', hint: 'Fill in one article.', run: () => setEditingProduct('new') },
+  ];
   
   const [massEditField, setMassEditField] = useState<keyof Product>('name');
   const [massEditValue, setMassEditValue] = useState('');
@@ -292,106 +298,113 @@ const StepResults: React.FC<StepResultsProps> = ({
         </div>
       )}
 
-      <div className="flex flex-col gap-4 bg-white px-6 py-4 rounded-xl border border-gray-200 shadow-sm">
-        <div className="flex-1 min-w-0">
-          <h2 className="text-xl font-bold text-[#002D72]">Step 2: Hierarchy Verification</h2>
-          <p className="text-sm text-gray-500">Edit cells directly. Only selected items ({selectedIds.size}) are used in subsequent tools.</p>
-          {source && (
-            <p className="text-xs text-gray-500 mt-1">
-              Loaded from {source.project && <span className="text-[9px] font-bold uppercase bg-blue-50 text-onestock-blue px-1.5 py-0.5 rounded mr-1">{source.project}</span>}
-              <strong>{source.label}</strong>
+      <div className="bg-white px-6 py-4 rounded-xl border border-gray-200 shadow-sm space-y-4">
+        <div className="flex flex-wrap items-start gap-4">
+          <div className="flex-1 min-w-[220px]">
+            <h2 className="text-xl font-bold text-[#002D72]">Product Manager</h2>
+            <p className="text-sm text-gray-500">
+              {products.length} product(s){products.length > 0 && <> · <strong>{selectedIds.size}</strong> selected (used by the payload, stock and orders)</>}
             </p>
-          )}
-        </div>
-        
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative group min-w-[200px]">
-            <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-            <input 
-              type="text"
-              placeholder="Search items..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:ring-1 focus:ring-onestock-blue focus:bg-white outline-none transition-all"
-            />
+            {source && (
+              <p className="text-xs text-gray-500 mt-1">
+                Loaded from {source.project && <span className="text-[9px] font-bold uppercase bg-blue-50 text-onestock-blue px-1.5 py-0.5 rounded mr-1">{source.project}</span>}
+                <strong>{source.label}</strong>
+              </p>
+            )}
           </div>
 
-          {(() => {
-            const scope = selectedIds.size ? products.filter(p => selectedIds.has(p.id)) : products;
-            return (
-              <HostImagesButton
-                urls={productImageUrls(scope)}
-                project={source?.project || getLastProject()}
-                onDone={map => replaceProductImages(scope, map).forEach(onUpdateProduct)}
-              />
-            );
-          })()}
+          {/* Add products: one menu for the 3 sources */}
+          <div className="relative">
+            <button
+              onClick={() => setIsAddMenuOpen(o => !o)}
+              className="px-4 py-2 text-xs font-bold text-onestock-blue border border-onestock-blue rounded-lg hover:bg-blue-50 flex items-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" /></svg>
+              Add products
+              <span className="text-[10px]">▾</span>
+            </button>
+            {isAddMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-20" onClick={() => setIsAddMenuOpen(false)} />
+                <div className="absolute right-0 mt-2 w-72 bg-white border border-gray-200 rounded-xl shadow-xl z-30 py-1">
+                  {addOptions.map(o => (
+                    <button key={o.label} onClick={() => { setIsAddMenuOpen(false); o.run(); }} className="w-full text-left px-4 py-2.5 hover:bg-blue-50">
+                      <p className="text-sm font-bold text-gray-800">{o.label}</p>
+                      <p className="text-[11px] text-gray-500">{o.hint}</p>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
 
-          <button 
-            onClick={() => setIsCaptureOpen(true)}
-            className="px-3 py-2 text-xs font-bold text-onestock-blue border border-onestock-blue rounded-lg hover:bg-blue-50 transition-all flex items-center gap-2"
-          >
-            Capture from a website
-          </button>
-
-          <button 
-            onClick={() => setIsSavedItemsOpen(true)}
-            className="px-3 py-2 text-xs font-bold text-onestock-blue border border-onestock-blue rounded-lg hover:bg-blue-50 transition-all flex items-center gap-2"
-          >
-            Load saved /items payloads
-          </button>
-
-          <button 
-            onClick={() => setEditingProduct('new')}
-            className="px-3 py-2 text-xs font-bold text-emerald-600 border border-emerald-200 bg-emerald-50 rounded-lg hover:bg-emerald-100 transition-all flex items-center gap-2"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" /></svg>
-            Add Product
-          </button>
-
-          <button 
-            onClick={() => setIsMassEditOpen(true)}
-            disabled={selectedIds.size === 0}
-            className="px-3 py-2 text-xs font-bold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-all flex items-center gap-2 disabled:opacity-30"
-          >
-            Mass Edit
-          </button>
-
-          <button 
-            onClick={() => setIsRegenerateOpen(true)}
-            disabled={selectedIds.size === 0}
-            className="px-3 py-2 text-xs font-bold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-all flex items-center gap-2 disabled:opacity-30"
-          >
-            Regenerate IDs
-          </button>
-
-          <button 
-            onClick={() => onGenerateJson(products.filter(p => selectedIds.has(p.id)))}
-            className="px-3 py-2 text-xs font-bold text-onestock-blue border border-onestock-blue rounded-lg hover:bg-blue-50 transition-all flex items-center gap-2"
-          >
-            Review JSON
-          </button>
-
-          <button 
-            onClick={handleDownloadJson}
-            className="px-3 py-2 text-xs font-bold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-all flex items-center gap-2"
-          >
-            Download
-          </button>
-          
-          <button 
+          <button
             onClick={() => setIsItemsPushOpen(true)}
             disabled={selectedIds.size === 0}
-            className="px-3 py-2 text-xs font-bold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-all flex items-center gap-2 disabled:opacity-30"
+            title={selectedIds.size === 0 ? 'Select products first' : undefined}
+            className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-30"
           >
-            Payload & Push /items
+            Payload & Push /items{selectedIds.size ? ` (${selectedIds.size})` : ''}
           </button>
         </div>
+
+        {products.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative flex-1 min-w-[200px] max-w-md">
+              <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <input
+                type="text"
+                placeholder="Search items..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:ring-1 focus:ring-onestock-blue focus:bg-white outline-none transition-all"
+              />
+            </div>
+
+            {/* Actions on the selection */}
+            {selectedIds.size > 0 ? (
+              <div className="flex flex-wrap items-center gap-1 p-1 bg-blue-50/60 border border-blue-100 rounded-lg">
+                <span className="px-2 text-[11px] font-bold text-onestock-blue">{selectedIds.size} selected</span>
+                {[
+                  ['Mass edit', () => setIsMassEditOpen(true)],
+                  ['Regenerate IDs', () => setIsRegenerateOpen(true)],
+                  ['Review JSON', () => onGenerateJson(products.filter(p => selectedIds.has(p.id)))],
+                  ['Download JSON', handleDownloadJson],
+                ].map(([label, run]) => (
+                  <button key={label as string} onClick={run as () => void} className="px-2.5 py-1.5 text-[11px] font-bold text-gray-700 rounded-md hover:bg-white">
+                    {label as string}
+                  </button>
+                ))}
+                <HostImagesButton
+                  urls={productImageUrls(products.filter(p => selectedIds.has(p.id)))}
+                  project={source?.project || getLastProject()}
+                  onDone={map => replaceProductImages(products.filter(p => selectedIds.has(p.id)), map).forEach(onUpdateProduct)}
+                  label="Copy images to DB"
+                  className="px-2.5 py-1.5 text-[11px] font-bold text-gray-700 rounded-md hover:bg-white disabled:opacity-40"
+                />
+                <button onClick={() => onSelectionChange(new Set())} title="Clear the selection" className="px-2 py-1.5 text-[11px] text-gray-400 hover:text-gray-700">✕</button>
+              </div>
+            ) : (
+              <span className="text-[11px] text-gray-400">Select products to edit, regenerate IDs, export or push them.</span>
+            )}
+          </div>
+        )}
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+      {products.length === 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {addOptions.map(o => (
+            <button key={o.label} onClick={o.run} className="text-left p-6 bg-white rounded-2xl border border-dashed border-gray-300 hover:border-onestock-blue hover:bg-blue-50/40 transition-all">
+              <p className="text-sm font-bold text-[#002D72]">{o.label}</p>
+              <p className="text-xs text-gray-500 mt-1">{o.hint}</p>
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className={`bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden ${products.length === 0 ? 'hidden' : ''}`}>
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[1600px]">
             <thead>
