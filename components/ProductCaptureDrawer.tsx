@@ -163,7 +163,7 @@ const ProductCaptureDrawer: React.FC<Props> = ({ defaultCurrency, onAdd, onClose
                           {[p.brand, p.sku && `SKU ${p.sku}`, p.gtin && `EAN ${p.gtin}`, p.price && `${p.price} ${p.currency}`].filter(Boolean).join(' · ')}
                         </p>
                         <p className="text-[10px] text-gray-400">
-                          {p.images.length} image(s) · {p.characteristics.length} characteristic(s) · {p.variants.length} variant(s) · {p.source}
+                          {p.images.length} image(s) · {p.characteristics.length} characteristic(s) · {p.variants.length} variant(s){p.variantSource ? ` (${p.variantSource})` : ''} · {p.source}
                         </p>
                       </div>
                       <button onClick={() => setOpen(isOpen ? null : k)} className="px-2 py-1 text-[11px] font-bold text-gray-600 border border-gray-300 rounded hover:bg-gray-50 shrink-0">{isOpen ? 'Hide' : 'View'}</button>
@@ -189,10 +189,10 @@ const ProductCaptureDrawer: React.FC<Props> = ({ defaultCurrency, onAdd, onClose
                         )}
                         {p.variants.length > 0 && (
                           <table className="w-full text-[11px]">
-                            <thead><tr className="text-left text-gray-400"><th>SKU</th><th>EAN</th><th>Color</th><th>Size</th><th>Price</th></tr></thead>
+                            <thead><tr className="text-left text-gray-400"><th>SKU</th><th>EAN</th><th>Color</th><th>Size</th><th>Price</th><th>Stock</th></tr></thead>
                             <tbody>
                               {p.variants.map((v, j) => (
-                                <tr key={j} className="border-b border-gray-50 font-mono"><td>{v.sku}</td><td>{v.gtin}</td><td>{v.color}</td><td>{v.size}</td><td>{v.price} {v.currency}</td></tr>
+                                <tr key={j} className="border-b border-gray-50 font-mono"><td>{v.sku}</td><td>{v.gtin}</td><td>{v.color}</td><td>{v.size}</td><td>{v.price} {v.currency}</td><td>{v.availability}</td></tr>
                               ))}
                             </tbody>
                           </table>

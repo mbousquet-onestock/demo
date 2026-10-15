@@ -283,6 +283,8 @@ export interface CapturedProduct {
   }[];
   // json-ld | microdata | opengraph | html
   source: string;
+  // Where the variants come from: json-ld | page-json | shopify | page-options (selector values, no variant SKU)
+  variantSource?: string;
   capturedAt: string;
 }
 
