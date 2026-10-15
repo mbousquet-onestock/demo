@@ -45,7 +45,8 @@ export enum AppStep {
   ORDER_GENERATION = 'ORDER_GENERATION',
   API_EXPLORER = 'API_EXPLORER',
   API_LOG = 'API_LOG',
-  STOCK_POINTS = 'STOCK_POINTS'
+  STOCK_POINTS = 'STOCK_POINTS',
+  MANUAL_STEPS = 'MANUAL_STEPS'
 }
 
 export interface ProcessedSite {
@@ -252,4 +253,18 @@ export interface OrderBatch {
   packages: { parent: any; subOrders: any[]; customer: any }[];
   // Creation result per order, keyed "parent:<id>" / "order:<id>".
   pushResults?: Record<string, StockPointPushResult>;
+}
+
+// A step to perform by hand (outside the app), filed under a project.
+export interface ManualStep {
+  id: string;
+  project?: string;
+  title: string;
+  description?: string;
+  status: 'todo' | 'in_progress' | 'done';
+  // Position within its project.
+  order: number;
+  createdAt: string;
+  updatedAt: string;
+  doneAt?: string;
 }

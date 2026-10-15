@@ -43,6 +43,8 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
   Generated batches are saved under a project (synced to the database) and created in OneStock: parent orders with
   `POST /parent_orders` (v4) then sub-orders with `POST /orders` (v3 / v4), status per order and retry of the failed ones.
   Several saved batches can be merged into one (duplicate parent orders ignored, creation results kept).
+- **Manual Steps**: checklist of the steps to perform by hand (OMC configuration, checks…), per project: status
+  (to do / in progress / done), details, ordering, progress, copy as a Markdown checklist; synced to the database.
 - **API Explorer**: all GET routes of the OneStock spec (`data/onestockGetEndpoints.json`, generated from the
   OpenAPI file). Requests / results are saved with a required name and an optional project, and listed by project.
   `GET /items` results can be opened in the Product Manager.
@@ -50,7 +52,7 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
 
 ## Database (Vercel Postgres / Neon)
 
-Import history, settings (token included) and saved payloads are stored in
+Import history, settings (token included), saved payloads, stock point sets, order batches and manual steps are stored in
 Postgres through the `api/data.ts` function (one `app_documents` table, created automatically). Each browser keeps a
 localStorage copy as cache; the first sync of a browser uploads its local data, afterwards the database wins.
 
