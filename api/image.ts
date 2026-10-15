@@ -12,3 +12,11 @@ export async function HEAD(request: Request): Promise<Response> {
 export async function POST(request: Request): Promise<Response> {
   return handleImageRequest(request);
 }
+
+export async function DELETE(request: Request): Promise<Response> {
+  return handleImageRequest(request);
+}
+
+export async function PATCH(request: Request): Promise<Response> {
+  return handleImageRequest(request);
+}

@@ -8,6 +8,7 @@ import { RegenerateIdsDrawer, ItemsPushDrawer, SavedItemsPicker } from './Produc
 import { buildItemsPayload } from '../utils/payloadUtils';
 import ProductCaptureDrawer from './ProductCaptureDrawer';
 import HostImagesButton from './HostImagesButton';
+import { getLastProject } from '../services/payloadStore';
 import { productImageUrls, replaceProductImages } from '../services/imageHosting';
 import { captureDrawerRequest } from '../services/captureService';
 import { captureInboxStore } from '../services/appStores';
@@ -322,6 +323,7 @@ const StepResults: React.FC<StepResultsProps> = ({
             return (
               <HostImagesButton
                 urls={productImageUrls(scope)}
+                project={source?.project || getLastProject()}
                 onDone={map => replaceProductImages(scope, map).forEach(onUpdateProduct)}
               />
             );

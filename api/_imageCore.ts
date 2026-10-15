@@ -1,7 +1,13 @@
 // Images copied to the database (Neon), served at a public URL for the OneStock /items payloads.
 //   POST /api/image (X-App-Key)  { sourceUrl } or { dataBase64, contentType }  → { id, url, contentType, size }
 //   GET  /img/<id>.<ext>  (public, rewritten to /api/image?id=<id>)            → the image
-// Ids are the SHA-256 of the content: an image is stored once, and its URL cannot be guessed.
+//   GET    /api/image?list=projects (X-App-Key)            → image count / size per project
+//   GET    /api/image?list=images&project=<p> (X-App-Key)  → images of a project (and its sub-folders "p/…")
+//   DELETE /api/image (X-App-Key) { project, ids? }         → detaches the images from the project (all, or ids);
+//                                                             an image left without any project is deleted
+//   PATCH  /api/image (X-App-Key) { from, to }               → renames a project and its sub-folders
+// Ids are the SHA-256 of the content: an image is stored once (it may belong to several projects), and its URL
+// cannot be guessed. "" is the project of images copied without a project.
 import { createHash } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
@@ -27,7 +33,20 @@ const imagesTable = async (): Promise<Sql> => {
         size INTEGER NOT NULL,
         source_url TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-      )`.catch(err => { tableReady = null; throw err; });
+      )`
+      .then(() => sql`
+        CREATE TABLE IF NOT EXISTS app_image_projects (
+          image_id TEXT NOT NULL REFERENCES app_images(id) ON DELETE CASCADE,
+          project TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          PRIMARY KEY (image_id, project)
+        )`)
+      // Images copied before projects existed: "no project".
+      .then(() => sql`
+        INSERT INTO app_image_projects (image_id, project)
+        SELECT i.id, '' FROM app_images i
+        WHERE NOT EXISTS (SELECT 1 FROM app_image_projects p WHERE p.image_id = i.id)`)
+      .catch(err => { tableReady = null; throw err; });
   }
   await tableReady;
   return sql;
@@ -74,6 +93,80 @@ const fetchImage = async (sourceUrl: string): Promise<{ bytes: Buffer; contentTy
 export const handleImageRequest = async (request: Request): Promise<Response> => {
   if (!getDatabaseUrl()) return json(503, { error: 'Database not configured (DATABASE_URL).' });
   try {
+    const params = new URL(request.url).searchParams;
+    const extOf = (type: string) => TYPES[type] || 'bin';
+    const normProject = (v: unknown) => (typeof v === 'string' ? v : '').split('/').map(x => x.trim()).filter(Boolean).join('/').slice(0, 300);
+
+    if (request.method === 'GET' && params.has('list')) {
+      if (!process.env.APP_ACCESS_KEY || !isAuthorized(request)) return json(401, { error: 'Invalid or missing access key.' });
+      const sql = await imagesTable();
+      if (params.get('list') === 'projects') {
+        const rows = await sql`
+          SELECT p.project, count(*)::int AS count, coalesce(sum(i.size), 0)::bigint AS size
+          FROM app_image_projects p JOIN app_images i ON i.id = p.image_id
+          GROUP BY p.project ORDER BY p.project` as any[];
+        return json(200, { projects: rows.map((r: any) => ({ project: r.project, count: r.count, size: Number(r.size) })) });
+      }
+      const project = normProject(params.get('project'));
+      const rows = await sql`
+        SELECT i.id, i.content_type, i.size, i.source_url, i.created_at, array_agg(DISTINCT p.project) AS projects
+        FROM app_images i JOIN app_image_projects p ON p.image_id = i.id
+        WHERE i.id IN (
+          SELECT image_id FROM app_image_projects
+          WHERE project = ${project} OR (${project} <> '' AND left(project, ${project.length + 1}) = ${project + '/'})
+        )
+        GROUP BY i.id ORDER BY max(p.created_at) DESC
+        LIMIT 2000` as any[];
+      return json(200, {
+        images: rows.map((r: any) => ({
+          id: r.id, path: `/img/${r.id}.${extOf(r.content_type)}`, contentType: r.content_type, size: r.size,
+          sourceUrl: r.source_url, createdAt: new Date(r.created_at).toISOString(), projects: r.projects,
+        })),
+      });
+    }
+
+    if (request.method === 'PATCH') {
+      if (!process.env.APP_ACCESS_KEY || !isAuthorized(request)) return json(401, { error: 'Invalid or missing access key.' });
+      const body = await request.json().catch(() => null) as { from?: unknown; to?: unknown } | null;
+      const from = normProject(body?.from);
+      const to = normProject(body?.to);
+      if (!from || !to) return json(400, { error: 'Expected { from, to } (project paths).' });
+      const sql = await imagesTable();
+      const moved = await sql`
+        INSERT INTO app_image_projects (image_id, project, created_at)
+        SELECT image_id, ${to} || substr(project, ${from.length + 1}), created_at FROM app_image_projects
+        WHERE project = ${from} OR left(project, ${from.length + 1}) = ${from + '/'}
+        ON CONFLICT DO NOTHING
+        RETURNING image_id` as any[];
+      await sql`DELETE FROM app_image_projects WHERE project = ${from} OR left(project, ${from.length + 1}) = ${from + '/'}`;
+      return json(200, { moved: moved.length });
+    }
+
+    if (request.method === 'DELETE') {
+      if (!process.env.APP_ACCESS_KEY || !isAuthorized(request)) return json(401, { error: 'Invalid or missing access key.' });
+      const body = await request.json().catch(() => null) as { project?: unknown; ids?: unknown; subfolders?: unknown } | null;
+      if (!body || typeof body.project !== 'string') return json(400, { error: 'Expected { project, ids?, subfolders? }.' });
+      const project = normProject(body.project);
+      const ids = Array.isArray(body.ids) ? body.ids.filter((x): x is string => typeof x === 'string' && /^[a-f0-9]{32}$/.test(x)) : null;
+      const sub = body.subfolders === true && project !== '';
+      const sql = await imagesTable();
+      const detached = ids
+        ? await sql`
+            DELETE FROM app_image_projects
+            WHERE image_id = ANY(${ids}::text[]) AND (project = ${project} OR (${sub} AND left(project, ${project.length + 1}) = ${project + '/'}))
+            RETURNING image_id` as any[]
+        : await sql`
+            DELETE FROM app_image_projects
+            WHERE project = ${project} OR (${sub} AND left(project, ${project.length + 1}) = ${project + '/'})
+            RETURNING image_id` as any[];
+      const deleted = await sql`
+        DELETE FROM app_images i
+        WHERE i.id = ANY(${[...new Set(detached.map((r: any) => r.image_id))]}::text[])
+          AND NOT EXISTS (SELECT 1 FROM app_image_projects p WHERE p.image_id = i.id)
+        RETURNING id` as any[];
+      return json(200, { detached: detached.length, deleted: deleted.length });
+    }
+
     if (request.method === 'GET' || request.method === 'HEAD') {
       const id = (new URL(request.url).searchParams.get('id') || '').replace(/\.[a-z0-9]+$/i, '');
       if (!/^[a-f0-9]{32}$/.test(id)) return json(400, { error: 'Invalid image id.' });
@@ -96,7 +189,7 @@ export const handleImageRequest = async (request: Request): Promise<Response> =>
     if (request.method === 'POST') {
       if (!process.env.APP_ACCESS_KEY) return json(503, { error: 'APP_ACCESS_KEY is not set on the server.' });
       if (!isAuthorized(request)) return json(401, { error: 'Invalid or missing access key.' });
-      const body = await request.json().catch(() => null) as { sourceUrl?: unknown; dataBase64?: unknown; contentType?: unknown } | null;
+      const body = await request.json().catch(() => null) as { sourceUrl?: unknown; dataBase64?: unknown; contentType?: unknown; project?: unknown } | null;
       let image: { bytes: Buffer; contentType: string };
       let sourceUrl: string | null = null;
       if (body && typeof body.sourceUrl === 'string') {
@@ -118,6 +211,9 @@ export const handleImageRequest = async (request: Request): Promise<Response> =>
         INSERT INTO app_images (id, content_type, data, size, source_url)
         VALUES (${id}, ${image.contentType}, ${image.bytes.toString('base64')}, ${image.bytes.length}, ${sourceUrl})
         ON CONFLICT (id) DO NOTHING`;
+      await sql`
+        INSERT INTO app_image_projects (image_id, project) VALUES (${id}, ${normProject(body?.project)})
+        ON CONFLICT DO NOTHING`;
       return json(200, { id, path: `/img/${id}.${TYPES[image.contentType]}`, contentType: image.contentType, size: image.bytes.length });
     }
 

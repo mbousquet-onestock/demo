@@ -1,10 +1,12 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { savedPayloadsStore } from '../services/payloadStore';
 import { stockPointSetsStore, orderBatchesStore, manualStepsStore } from '../services/appStores';
 import { useApiTarget, missingTargetFields, isProductionTarget } from '../services/onestockClient';
 import {
   savedPayloadItems, stockPointSetItems, orderBatchItems, replayItem, ReplayItem, ReplayResult,
 } from '../services/replayService';
+import { listImageProjects, renameImageProject } from '../services/imageHosting';
+import ProjectImages from './ProjectImages';
 
 const NO_PROJECT = '__none__';
 // Projects are folder paths: "Client/Phase 1/Run A" is the sub-folder "Run A" of "Client/Phase 1".
@@ -59,27 +61,32 @@ const StepProjects: React.FC = () => {
   const target = useApiTarget();
   const targetMissing = missingTargetFields(target);
 
-  type Stats = { payloads: number; sets: number; points: number; batches: number; orders: number; steps: number; stepsDone: number };
+  type Stats = { payloads: number; sets: number; points: number; batches: number; orders: number; steps: number; stepsDone: number; images: number };
+  // Images copied to the database, per project (server side).
+  const [imageCounts, setImageCounts] = useState<{ project: string; count: number }[]>([]);
+  const refreshImages = () => listImageProjects().then(setImageCounts).catch(() => setImageCounts([]));
+  useEffect(() => { refreshImages(); }, []);
   // Own content of each project path.
   const own = useMemo(() => {
     const map = new Map<string, Stats>();
     const get = (k: string) => {
-      if (!map.has(k)) map.set(k, { payloads: 0, sets: 0, points: 0, batches: 0, orders: 0, steps: 0, stepsDone: 0 });
+      if (!map.has(k)) map.set(k, { payloads: 0, sets: 0, points: 0, batches: 0, orders: 0, steps: 0, stepsDone: 0, images: 0 });
       return map.get(k)!;
     };
     payloads.forEach(p => { get(keyOf(p.project)).payloads++; });
     sets.forEach(s => { const e = get(keyOf(s.project)); e.sets++; e.points += s.endpoints.length; });
     batches.forEach(b => { const e = get(keyOf(b.project)); e.batches++; e.orders += b.packages.reduce((n, p) => n + p.subOrders.length, 0); });
     steps.forEach(s => { const e = get(keyOf(s.project)); e.steps++; if (s.status === 'done') e.stepsDone++; });
+    imageCounts.forEach(i => { get(keyOf(i.project)).images += i.count; });
     return map;
-  }, [payloads, sets, batches, steps]);
+  }, [payloads, sets, batches, steps, imageCounts]);
 
   // Folder tree: every project path and its parent folders, with the totals of their sub-folders.
   const projects = useMemo(() => {
     const keys = new Set<string>();
     own.forEach((_, k) => { keys.add(k); parentsOf(k).forEach(p => keys.add(p)); });
     return [...keys].sort(compareKeys).map(k => {
-      const total: Stats = { payloads: 0, sets: 0, points: 0, batches: 0, orders: 0, steps: 0, stepsDone: 0 };
+      const total: Stats = { payloads: 0, sets: 0, points: 0, batches: 0, orders: 0, steps: 0, stepsDone: 0, images: 0 };
       own.forEach((s, key) => {
         if (!inFolder(key, k)) return;
         (Object.keys(total) as (keyof Stats)[]).forEach(f => { total[f] += s[f]; });
@@ -171,7 +178,7 @@ const StepProjects: React.FC = () => {
 
   const replayed = items.filter(i => results[i.key]);
   const okCount = replayed.filter(i => results[i.key].ok).length;
-  const stats = withSubfolders ? projects.find(([k]) => k === current)?.[1] : (current && own.get(current)) || (current ? { payloads: 0, sets: 0, points: 0, batches: 0, orders: 0, steps: 0, stepsDone: 0 } : undefined);
+  const stats = withSubfolders ? projects.find(([k]) => k === current)?.[1] : (current && own.get(current)) || (current ? { payloads: 0, sets: 0, points: 0, batches: 0, orders: 0, steps: 0, stepsDone: 0, images: 0 } : undefined);
   const searching = projectSearch.trim().toLowerCase();
   const filteredProjects = projects.filter(([k]) => searching
     ? titleOf(k).toLowerCase().includes(searching)
@@ -203,6 +210,8 @@ const StepProjects: React.FC = () => {
     if (inFolder(to, current)) { window.alert('A folder cannot be moved into itself.'); return; }
     renameFolder(current, to);
     setSelectedProject(to);
+    // Images copied to the database follow the folder.
+    renameImageProject(current, to).then(refreshImages).catch(() => { /* no database / no image */ });
   };
 
   return (
@@ -239,7 +248,7 @@ const StepProjects: React.FC = () => {
                         {searching ? titleOf(k) : leafOf(k)}
                       </p>
                       <p className="text-[10px] text-gray-400 mt-0.5">
-                        {[s.payloads && `${s.payloads} payload(s)`, s.sets && `${s.points} stock point(s)`, s.batches && `${s.orders} order(s)`, s.steps && `${s.stepsDone}/${s.steps} step(s)`].filter(Boolean).join(' · ')}
+                        {[s.payloads && `${s.payloads} payload(s)`, s.sets && `${s.points} stock point(s)`, s.batches && `${s.orders} order(s)`, s.steps && `${s.stepsDone}/${s.steps} step(s)`, s.images && `${s.images} image(s)`].filter(Boolean).join(' · ')}
                       </p>
                     </button>
                     {!searching && hasChildren(k) && (
@@ -305,6 +314,8 @@ const StepProjects: React.FC = () => {
                   </div>
                 )}
               </div>
+
+              <ProjectImages folder={current === NO_PROJECT ? '' : current} includeSubfolders={withSubfolders} onChanged={refreshImages} />
 
               {/* Replay toolbar */}
               <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 flex flex-wrap items-center gap-2 sticky top-0 z-10">
