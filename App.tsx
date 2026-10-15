@@ -206,6 +206,7 @@ const App: React.FC = () => {
               <StepStockUpdate 
                 products={selectedProducts} 
                 settings={settings} 
+                onEndpointsChange={ids => setSettings(prev => ({ ...prev, stockEndpoints: ids }))}
                 onCancel={() => setCurrentStep(AppStep.RESULTS)}
               />
             )}

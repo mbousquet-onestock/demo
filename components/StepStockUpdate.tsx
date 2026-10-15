@@ -2,21 +2,29 @@
 import React, { useState, useMemo } from 'react';
 import { SITE_ID_VAR, TOKEN_VAR } from '../services/onestockClient';
 import { Product, AppSettings } from '../types';
+import StockPointsPicker from './StockPointsPicker';
+import { mergeIds } from '../utils/endpointUtils';
 
 interface StepStockUpdateProps {
   products: Product[];
   settings: AppSettings;
+  // Stock points used as columns (kept in the settings, shared with the Order Generator).
+  onEndpointsChange: (ids: string[]) => void;
   onCancel: () => void;
 }
 
-const StepStockUpdate: React.FC<StepStockUpdateProps> = ({ products, settings, onCancel }) => {
+const StepStockUpdate: React.FC<StepStockUpdateProps> = ({ products, settings, onEndpointsChange, onCancel }) => {
+  const endpoints = settings.stockEndpoints;
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const [newEndpoint, setNewEndpoint] = useState('');
+  const [endpointsSource, setEndpointsSource] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'table' | 'payload'>('table');
   const [searchTerm, setSearchTerm] = useState('');
   const [stockLevels, setStockLevels] = useState<Record<string, Record<string, number>>>(() => {
     const initial: Record<string, Record<string, number>> = {};
     products.forEach(p => {
       initial[p.sku] = {};
-      settings.stockEndpoints.forEach(ep => {
+      endpoints.forEach(ep => {
         initial[p.sku][ep] = 0;
       });
     });
@@ -65,7 +73,8 @@ const StepStockUpdate: React.FC<StepStockUpdateProps> = ({ products, settings, o
     setStockLevels(prev => {
       const updated = { ...prev };
       products.forEach(p => {
-        settings.stockEndpoints.forEach(ep => {
+        updated[p.sku] = { ...(updated[p.sku] || {}) };
+        endpoints.forEach(ep => {
           const isZero = Math.random() < 0.5;
           updated[p.sku][ep] = isZero ? 0 : Math.floor(Math.random() * 25) + 1;
         });
@@ -78,7 +87,8 @@ const StepStockUpdate: React.FC<StepStockUpdateProps> = ({ products, settings, o
     setStockLevels(prev => {
       const updated = { ...prev };
       products.forEach(p => {
-        settings.stockEndpoints.forEach(ep => {
+        updated[p.sku] = { ...(updated[p.sku] || {}) };
+        endpoints.forEach(ep => {
           updated[p.sku][ep] = 0;
         });
       });
@@ -86,18 +96,27 @@ const StepStockUpdate: React.FC<StepStockUpdateProps> = ({ products, settings, o
     });
   };
 
+  // One line per product and current stock point (stock points removed from the list are left out).
   const getStockDataArray = () => {
     const formattedStocks: { item_id: string; endpoint_id: string; quantity: number }[] = [];
-    Object.entries(stockLevels).forEach(([sku, endpoints]) => {
-      Object.entries(endpoints).forEach(([ep, qty]) => {
-        formattedStocks.push({
-          item_id: sku,
-          endpoint_id: ep,
-          quantity: qty
-        });
+    products.forEach(p => {
+      endpoints.forEach(ep => {
+        formattedStocks.push({ item_id: p.sku, endpoint_id: ep, quantity: stockLevels[p.sku]?.[ep] ?? 0 });
       });
     });
     return formattedStocks;
+  };
+
+  const handleLoadEndpoints = (ids: string[], label: string, mode: 'replace' | 'append') => {
+    onEndpointsChange(mode === 'replace' ? ids : mergeIds(endpoints, ids));
+    setEndpointsSource(mode === 'replace' || !endpointsSource ? label : `${endpointsSource} + ${label}`);
+  };
+
+  const addEndpoint = () => {
+    const id = newEndpoint.trim();
+    if (!id || endpoints.includes(id)) return;
+    onEndpointsChange([...endpoints, id]);
+    setNewEndpoint('');
   };
 
   const generatePayload = () => {
@@ -138,7 +157,7 @@ const StepStockUpdate: React.FC<StepStockUpdateProps> = ({ products, settings, o
         <div className="flex items-center justify-between bg-white px-6 py-4 rounded-xl border border-gray-200 shadow-sm">
           <div>
             <h2 className="text-xl font-bold text-[#002D72]">Stock Payload Generation</h2>
-            <p className="text-sm text-gray-500">Technical body for inventory synchronization across <strong>{settings.stockEndpoints.length}</strong> endpoints.</p>
+            <p className="text-sm text-gray-500">Technical body for inventory synchronization across <strong>{endpoints.length}</strong> endpoints.</p>
           </div>
           <div className="flex gap-3">
             <button 
@@ -220,12 +239,51 @@ const StepStockUpdate: React.FC<StepStockUpdateProps> = ({ products, settings, o
         </div>
       </div>
 
+      {isPickerOpen && (
+        <StockPointsPicker hasEndpoints={endpoints.length > 0} onLoad={handleLoadEndpoints} onClose={() => setIsPickerOpen(false)} />
+      )}
+
+      <div className="bg-white px-6 py-4 rounded-2xl border border-gray-200 shadow-sm space-y-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <h3 className="text-xs font-bold text-[#002D72] uppercase tracking-widest">Stock points ({endpoints.length})</h3>
+          {endpointsSource && <span className="text-[11px] text-gray-500">Loaded from <strong>{endpointsSource}</strong></span>}
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <input
+              value={newEndpoint}
+              onChange={e => setNewEndpoint(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && addEndpoint()}
+              placeholder="Add an endpoint id…"
+              className="w-48 px-3 py-1.5 text-xs bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-onestock-blue"
+            />
+            <button onClick={addEndpoint} className="px-3 py-1.5 text-xs font-bold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">Add</button>
+            <button onClick={() => setIsPickerOpen(true)} className="px-3 py-1.5 text-xs font-bold text-white bg-onestock-blue rounded-lg hover:bg-[#001F4D]">Load stock points</button>
+            {endpoints.length > 0 && (
+              <button onClick={() => { if (window.confirm('Remove all stock points from the list?')) { onEndpointsChange([]); setEndpointsSource(null); } }} className="px-3 py-1.5 text-xs font-bold text-red-600 border border-red-200 rounded-lg hover:bg-red-50">Clear</button>
+            )}
+          </div>
+        </div>
+        {endpoints.length === 0 ? (
+          <p className="text-xs text-gray-400">No stock point: load a list from the saved payloads / Stock Points sets, or add ids manually.</p>
+        ) : (
+          <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
+            {endpoints.map(ep => (
+              <span key={ep} className="bg-blue-50 border border-blue-100 pl-2.5 pr-1.5 py-1 rounded-lg flex items-center gap-1.5">
+                <span className="text-[11px] font-mono font-bold text-onestock-blue">{ep}</span>
+                <button onClick={() => onEndpointsChange(endpoints.filter(e => e !== ep))} className="text-blue-300 hover:text-red-500" title="Remove">
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden overflow-x-auto">
         <table className="w-full text-left border-collapse min-w-[800px]">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-100">
               <th className="px-6 py-4 text-[10px] font-bold text-gray-400 uppercase tracking-widest w-64">Item Identifier (SKU)</th>
-              {settings.stockEndpoints.map(ep => (
+              {endpoints.map(ep => (
                 <th key={ep} className="px-4 py-4 text-[10px] font-bold text-[#002D72] uppercase tracking-widest text-center border-l border-gray-100">
                   <div className="flex flex-col items-center gap-2">
                     <span>{ep}</span>
@@ -254,7 +312,7 @@ const StepStockUpdate: React.FC<StepStockUpdateProps> = ({ products, settings, o
                     </div>
                   </div>
                 </td>
-                {settings.stockEndpoints.map(ep => (
+                {endpoints.map(ep => (
                   <td key={ep} className="px-4 py-4 border-l border-gray-50">
                     <input 
                       type="number"
@@ -269,7 +327,7 @@ const StepStockUpdate: React.FC<StepStockUpdateProps> = ({ products, settings, o
             ))}
             {filteredProducts.length === 0 && (
               <tr>
-                <td colSpan={settings.stockEndpoints.length + 1} className="px-6 py-12 text-center text-gray-400 italic">
+                <td colSpan={endpoints.length + 1} className="px-6 py-12 text-center text-gray-400 italic">
                   No products found matching your search.
                 </td>
               </tr>

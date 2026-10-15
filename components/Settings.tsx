@@ -10,7 +10,6 @@ interface SettingsProps {
 }
 
 const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
-  const [newEndpoint, setNewEndpoint] = useState('');
   const [newOrderChannel, setNewOrderChannel] = useState('');
   const [newRuleset, setNewRuleset] = useState('');
   const [newCountryCode, setNewCountryCode] = useState('');
@@ -18,7 +17,6 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
   const businessRulesFileRef = useRef<HTMLInputElement>(null);
   
   // Specific refs for individual imports
-  const endpointFileRef = useRef<HTMLInputElement>(null);
   const channelFileRef = useRef<HTMLInputElement>(null);
   const rulesetFileRef = useRef<HTMLInputElement>(null);
   const countryFileRef = useRef<HTMLInputElement>(null);
@@ -78,7 +76,6 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
 
   const handleExportRules = () => {
     handleExportFile({
-      stockEndpoints: settings.stockEndpoints,
       orderSalesChannels: settings.orderSalesChannels,
       rulesets: settings.rulesets,
       deliveryCountries: settings.deliveryCountries
@@ -104,10 +101,9 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
           }
         } else {
           // Global import
-          if (data.stockEndpoints || data.orderSalesChannels || data.rulesets || data.deliveryCountries) {
+          if (data.orderSalesChannels || data.rulesets || data.deliveryCountries) {
             onSave({
               ...settings,
-              stockEndpoints: Array.isArray(data.stockEndpoints) ? data.stockEndpoints : settings.stockEndpoints,
               orderSalesChannels: Array.isArray(data.orderSalesChannels) ? data.orderSalesChannels : settings.orderSalesChannels,
               rulesets: Array.isArray(data.rulesets) ? data.rulesets : settings.rulesets,
               deliveryCountries: Array.isArray(data.deliveryCountries) ? data.deliveryCountries : settings.deliveryCountries
@@ -206,7 +202,6 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
         </div>
         
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-12">
-          {renderListManager('Inventory Endpoints', 'stockEndpoints', newEndpoint, setNewEndpoint, 'e.g. Store_01', endpointFileRef)}
           {renderListManager('Order Sales Channels', 'orderSalesChannels', newOrderChannel, setNewOrderChannel, 'e.g. TikTok_ES', channelFileRef)}
           {renderListManager('Available Rulesets', 'rulesets', newRuleset, setNewRuleset, 'e.g. standard_ffs', rulesetFileRef)}
           

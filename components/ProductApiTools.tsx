@@ -7,7 +7,7 @@ import { savePayload, downloadJson, savedPayloadsStore, listProjects, getLastPro
 const labelClass = 'block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5';
 const inputClass = 'w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:border-onestock-blue';
 
-const Drawer: React.FC<{ title: string; onClose: () => void; wide?: boolean; children: React.ReactNode }> = ({ title, onClose, wide, children }) => (
+export const Drawer: React.FC<{ title: string; onClose: () => void; wide?: boolean; children: React.ReactNode }> = ({ title, onClose, wide, children }) => (
   <div className="fixed inset-0 z-[110] flex justify-end animate-in fade-in duration-200">
     <div className="absolute inset-0 bg-black/20 backdrop-blur-sm" onClick={onClose}></div>
     <div className={`relative ${wide ? 'w-full max-w-3xl' : 'w-full max-w-md'} bg-white shadow-2xl h-full p-8 overflow-y-auto animate-in slide-in-from-right duration-300 border-l border-gray-200`}>
