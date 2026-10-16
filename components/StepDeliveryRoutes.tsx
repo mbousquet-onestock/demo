@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   deliveryConfigStore, loadDeliveryConfig, matchZone, placeOfEndpoint, zoneSummary, carrierLabel, transitLabel,
-  fetchItemStock, savedImportStock, analyseDelivery, nextOpenings, TIMETABLE_KINDS, timetableReport, routeTimetableIssues, transitIssue, VERDICT_LABELS, EndpointAnalysis, StockLine, Verdict, RouteEndpoint,
+  fetchItemStock, savedImportStock, analyseDelivery, nextOpenings, TIMETABLE_KINDS, timetableReport, routeTimetableIssues, transitIssue, executionTimeIssue, endpointExecutionTimes, durationMinutes, VERDICT_LABELS, EndpointAnalysis, StockLine, Verdict, RouteEndpoint,
 } from '../services/deliveryRouteService';
 import { useApiTarget, missingTargetFields } from '../services/onestockClient';
 import DeliveryRoutesGraph from './DeliveryRoutesGraph';
@@ -11,7 +11,7 @@ import TimetableWeek, { TIMETABLE_STATUS } from './TimetableWeek';
 
 const inputClass = 'px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-[#002D72]';
 const card = 'bg-white rounded-2xl border border-gray-200 shadow-sm';
-type View = 'routes' | 'zones' | 'analysis';
+type View = 'routes' | 'zones' | 'execution' | 'analysis';
 
 // Delivery Promise configuration: delivery routes between zones, stock points of each zone, and who can deliver an
 // article (stock per stock point × routes × destination).
@@ -125,7 +125,7 @@ const StepDeliveryRoutes: React.FC = () => {
       {config && (
         <>
           <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
-            {([['routes', `Routes (${config.routes.length})`], ['zones', `Zones (${config.zones.length})`], ['analysis', 'Article analysis']] as [View, string][]).map(([v, label]) => (
+            {([['routes', `Routes (${config.routes.length})`], ['zones', `Zones (${config.zones.length})`], ['execution', `Execution times (${config.executionTimes?.length ?? 0})`], ['analysis', 'Article analysis']] as [View, string][]).map(([v, label]) => (
               <button key={v} onClick={() => setView(v)} className={`px-4 py-1.5 text-xs font-bold rounded-lg ${view === v ? 'bg-white text-[#002D72] shadow-sm' : 'text-gray-500'}`}>{label}</button>
             ))}
           </div>
@@ -245,6 +245,44 @@ const StepDeliveryRoutes: React.FC = () => {
             </div>
           )}
 
+          {view === 'execution' && (
+            <div className={`${card} overflow-x-auto`}>
+              {config.executionTimes === undefined ? <p className="p-6 text-sm text-gray-400">Reload from OneStock to read the execution times.</p>
+                : config.executionTimes.length === 0 ? <p className="p-6 text-sm text-gray-400">No execution time returned by GET /execution_times.</p> : (
+                <table className="w-full text-xs">
+                  <thead className="bg-gray-50 text-left text-[10px] uppercase tracking-widest text-gray-400">
+                    <tr><th className="px-4 py-3">Execution time</th><th className="px-4 py-3">Operation</th><th className="px-4 py-3">Duration</th><th className="px-4 py-3">Moment</th><th className="px-4 py-3">Timetable</th><th className="px-4 py-3">Stock points</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {config.executionTimes.map(et => {
+                      const rep = timetableReport(et.timetable_id, config.timetables);
+                      const issue = executionTimeIssue(et, config.timetables);
+                      const users = config.endpoints.filter(ep => endpointExecutionTimes(ep, config.executionTimes).some(x => x.id === et.id));
+                      const min = durationMinutes(et.duration);
+                      return (
+                        <tr key={et.id} className="align-top">
+                          <td className="px-4 py-2.5"><p className="font-bold text-gray-900">{et.name || et.id}</p><p className="font-mono text-gray-400">{et.id}</p>
+                            {et.used_options?.length ? <p className="text-gray-400">options: {et.used_options.join(', ')}</p> : null}
+                            {issue && <p className="text-red-600 font-bold mt-1">⚠ {issue}</p>}</td>
+                          <td className="px-4 py-2.5 font-mono">{et.operation || '—'}</td>
+                          <td className="px-4 py-2.5"><span className="font-mono">{et.duration || '—'}</span>{min !== null && <p className="text-gray-400">{min >= 60 ? `${Math.round(min / 6) / 10} h` : `${min} min`}</p>}</td>
+                          <td className="px-4 py-2.5 font-mono text-gray-600">{et.execution_moment || '—'}</td>
+                          <td className="px-4 py-2.5" title={rep.summary}>
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${TIMETABLE_STATUS[rep.status].cls}`}>{TIMETABLE_STATUS[rep.status].label}{rep.hoursPerWeek ? ` · ${rep.hoursPerWeek} h` : ''}</span>
+                            {et.timetable_id && <span className="ml-1 font-mono text-gray-400">{et.timetable_id}</span>}
+                            {(rep.status === 'ok' || rep.status === 'partial') && <TimetableWeek report={rep} width={210} />}
+                            {rep.exceptions.length > 0 && <p className="text-[10px] text-gray-400">{rep.exceptions.length} dated span(s)</p>}
+                          </td>
+                          <td className="px-4 py-2.5 text-gray-600">{users.length ? users.slice(0, 8).map(u => u.name || u.id).join(', ') + (users.length > 8 ? ` +${users.length - 8}` : '') : <span className="text-gray-300">—</span>}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+
           {view === 'analysis' && (
             <div className="space-y-4">
               <div className={`${card} p-5 flex flex-wrap items-end gap-3`}>
@@ -304,6 +342,9 @@ const StepDeliveryRoutes: React.FC = () => {
                             <td className="px-4 py-2 text-gray-600">
                               {a.explanation}
                               {a.opening && a.quantity > 0 && <p className="text-amber-700 font-bold">⚠ Opening hours: {a.opening}</p>}
+                              {a.quantity > 0 && endpointExecutionTimes(a.endpoint as RouteEndpoint, config.executionTimes).map(et => ({ et, issue: executionTimeIssue(et, config.timetables) })).filter(x => x.issue).map(x => (
+                                <p key={`e-${x.et.id}`} className="text-amber-700">⚠ Execution time {x.et.id} ({x.et.operation}): {x.issue}</p>
+                              ))}
                               {a.quantity > 0 && (a.deliveringRoutes.length ? a.deliveringRoutes : a.routes).filter(r => transitIssue(r)).map(r => (
                                 <p key={`t-${r.id}`} className="text-red-600">⚠ Route {r.id} transit: {transitIssue(r)}</p>
                               ))}

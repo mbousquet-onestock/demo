@@ -84,12 +84,24 @@ export interface Timetable {
   hours?: { timezone?: string; timespans?: { start?: number; end?: number; options?: Record<string, boolean> }[] };
 }
 
+// Time of an operation (pick_pack…) and its timetable (GET /execution_times).
+export interface ExecutionTime {
+  id: string;
+  name?: string;
+  operation?: string;
+  duration?: string;
+  execution_moment?: string;
+  timetable_id?: string;
+  used_options?: string[];
+}
+
 export interface DeliveryConfig {
   routes: DeliveryRoute[];
   zones: Zone[];
   endpoints: RouteEndpoint[];
   // Timetables used by the routes (opening / pickup / delivery), by id.
   timetables?: Record<string, Timetable>;
+  executionTimes?: ExecutionTime[];
   loadedAt: string;
   site: string;
 }
@@ -145,9 +157,12 @@ export const loadDeliveryConfig = async (onProgress?: (text: string) => void): P
   const zones = arrayIn(await get('/zones', {}), ['zones']) as Zone[];
   onProgress?.('Reading stock points…');
   const endpoints = await fetchEndpoints(n => onProgress?.(`Reading stock points… ${n}`));
-  onProgress?.('Reading route timetables…');
-  const timetables = await fetchTimetables(routeTimetableIds(routes)).catch(() => ({}));
-  const config = { routes, zones, endpoints, timetables, loadedAt: new Date().toISOString(), site: getApiTarget().siteId };
+  onProgress?.('Reading execution times…');
+  const executionTimes = arrayIn(await get('/execution_times', {}).catch(() => null), ['execution_times']) as ExecutionTime[];
+  onProgress?.('Reading timetables…');
+  const ttIds = [...new Set([...routeTimetableIds(routes), ...executionTimes.map(e => e.timetable_id).filter(Boolean) as string[]])];
+  const timetables = await fetchTimetables(ttIds).catch(() => ({}));
+  const config = { routes, zones, endpoints, timetables, executionTimes, loadedAt: new Date().toISOString(), site: getApiTarget().siteId };
   deliveryConfigStore.set(config);
   return config;
 };
@@ -440,4 +455,34 @@ export const transitIssue = (r: DeliveryRoute): string => {
   if (min !== undefined && max < min) return `maximum (${max} h) lower than minimum (${min} h)`;
   if (min === 0) return 'minimum transit time is 0 h';
   return '';
+};
+
+// ---- Execution times: duration ("2h", "30m", "1d") and timetable
+export const durationMinutes = (d?: string): number | null => {
+  if (!d) return null;
+  const m = String(d).trim().match(/^(\d+(?:\.\d+)?)\s*([dhms]?)$/i);
+  if (!m) return null;
+  const n = parseFloat(m[1]);
+  const unit = m[2].toLowerCase();
+  return unit === 'd' ? n * 1440 : unit === 'h' ? n * 60 : unit === 's' ? n / 60 : n;
+};
+
+export const executionTimeIssue = (et: ExecutionTime, timetables: Record<string, Timetable> | undefined): string => {
+  const issues: string[] = [];
+  const minutes = durationMinutes(et.duration);
+  if (minutes === null) issues.push(`duration "${et.duration ?? ''}" not readable`);
+  if (et.timetable_id) {
+    const rep = timetableReport(et.timetable_id, timetables);
+    if (rep.status === 'empty' || rep.status === 'not-found') issues.push(rep.summary);
+  } else if (/always_at_start/i.test(et.execution_moment || '')) {
+    issues.push('timetable required (execution_moment always_at_start) but not set');
+  }
+  return issues.join(' ; ');
+};
+
+// Execution times of a stock point (when GET /endpoints returns them).
+export const endpointExecutionTimes = (ep: RouteEndpoint, all: ExecutionTime[] | undefined): ExecutionTime[] => {
+  const refs = (ep as any).execution_times;
+  if (!Array.isArray(refs) || !all) return [];
+  return refs.map((r: any) => all.find(e => e.id === (r?.id ?? r)) || { id: String(r?.id ?? r), operation: r?.operation }) as ExecutionTime[];
 };

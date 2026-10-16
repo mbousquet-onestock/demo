@@ -3,7 +3,7 @@ import { onestockRequest, describeCallError, SITE_ID_VAR, TOKEN_VAR, useApiTarge
 import { fetchSalesChannels, SalesChannelInfo } from '../services/salesChannelService';
 import { settingsStore } from '../services/appStores';
 import { savePayload, getLastProject } from '../services/payloadStore';
-import { DeliveryConfig, EndpointAnalysis, carrierLabel, routeTimetableIssues, transitIssue } from '../services/deliveryRouteService';
+import { DeliveryConfig, EndpointAnalysis, carrierLabel, routeTimetableIssues, transitIssue, executionTimeIssue, endpointExecutionTimes, RouteEndpoint } from '../services/deliveryRouteService';
 
 interface Props {
   config: DeliveryConfig;
@@ -289,6 +289,13 @@ const DeliveryPromisePanel: React.FC<Props> = ({ config, itemId, country, zip, a
                       return issues.length
                         ? <p className="text-amber-800">Routes transit / timetables: {issues.map(x => `${x.r.id} (${carrierLabel(x.r)}) — ${x.issue}`).join(' ; ')}.</p>
                         : routes.length ? <p className="text-gray-700">The transit times and timetables of the {routes.length} route(s) from the stock are set.</p> : null;
+                    })()}
+                    {['beyond_time_limit', 'no_eligible_route', 'missing_destination_timetable'].includes(o.reason) && (() => {
+                      // Execution times of the stock points with stock when known, else every execution time of the site.
+                      const own = withStock.flatMap(a => endpointExecutionTimes(a.endpoint as RouteEndpoint, config.executionTimes));
+                      const list = own.length ? own : config.executionTimes || [];
+                      const issues = [...new Map(list.map(e => [e.id, e])).values()].map(e => ({ e, issue: executionTimeIssue(e, config.timetables) })).filter(x => x.issue);
+                      return issues.length ? <p className="text-amber-800">Execution times: {issues.map(x => `${x.e.id} (${x.e.operation || '?'}, ${x.e.duration || '?'}) — ${x.issue}`).join(' ; ')}.</p> : null;
                     })()}
                     {['beyond_time_limit', 'no_eligible_route'].includes(o.reason) && withStock.length > 0 && !withStock.some(a => a.opening) && (
                       <p className="text-gray-700">The stock points with stock have opening hours in the next 7 days: look at the route timetables.</p>

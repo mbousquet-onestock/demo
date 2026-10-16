@@ -61,6 +61,9 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
   delivery promise failures (beyond_time_limit, no_eligible_route, missing_destination_timetable).
   Transit times (minimum / maximum transit hours) are shown per route; 0 h, not set or max < min is flagged (dashed curve
   in the graph, warnings in the analysis and the delivery promise causes).
+  **Execution times** (`GET /execution_times`): operation, duration ("2h", "30m"), execution moment and timetable
+  (weekly view), the stock points using them (when GET /endpoints returns their `execution_times`); unreadable durations,
+  missing / empty timetables and always_at_start without timetable are flagged, in the analysis and as promise causes.
   **Article analysis**: for an item and a destination (country, zip), reads the stock per stock point (`GET /stocks`
   and/or the saved `PATCH /stock_import` payloads), then tells for each stock point whether it can deliver and why not
   (in no origin zone, no route from its zones, destination not covered by the routes), on a map and in a table.
