@@ -3,6 +3,9 @@ import { getAccessKey } from './dbSync';
 
 // Images copied to the app database and served at <app>/img/<id>.<ext> (public URL for the /items payloads).
 export const isHostedImage = (url: string) => url.startsWith(`${window.location.origin}/img/`);
+// Article images must be PNG files hosted by the app.
+export const isHostedPng = (url: string) => isHostedImage(url) && /\.png(\?|$)/i.test(url);
+export const needsHosting = (url: string) => /^https?:\/\//i.test(url) && !isHostedPng(url);
 export const isLocalOrigin = () => /^(localhost|127\.|0\.0\.0\.0|\[::1\])/.test(window.location.hostname);
 
 const call = async (method: string, query = '', body?: unknown): Promise<any> => {
@@ -44,40 +47,56 @@ const toBase64 = (blob: Blob) => new Promise<string>((resolve, reject) => {
   reader.readAsDataURL(blob);
 });
 
-// Keeps uploads under the function body limit (4.5 MB): large images are resized to 2000 px, JPEG.
-const shrink = async (blob: Blob): Promise<Blob> => {
-  if (blob.size <= 2_500_000) return blob;
+// Any image → PNG (max 2000 px; smaller while above 3 MB, the upload limit of the function).
+export const toPng = async (blob: Blob): Promise<Blob> => {
   const bitmap = await createImageBitmap(blob);
-  const scale = Math.min(1, 2000 / Math.max(bitmap.width, bitmap.height));
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.round(bitmap.width * scale);
-  canvas.height = Math.round(bitmap.height * scale);
-  canvas.getContext('2d')!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  return new Promise((resolve, reject) => canvas.toBlob(b => (b ? resolve(b) : reject(new Error('Resize failed'))), 'image/jpeg', 0.85));
+  let scale = Math.min(1, 2000 / Math.max(bitmap.width, bitmap.height));
+  for (;;) {
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    canvas.getContext('2d')!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const png = await new Promise<Blob>((resolve, reject) => canvas.toBlob(b => (b ? resolve(b) : reject(new Error('PNG conversion failed'))), 'image/png'));
+    if (png.size <= 3_000_000 || scale < 0.2) return png;
+    scale *= 0.75;
+  }
 };
 
 export const uploadImageFile = async (file: Blob, project = ''): Promise<string> => {
-  const blob = await shrink(file);
-  return post({ dataBase64: await toBase64(blob), contentType: blob.type || 'image/jpeg', project });
+  const png = await toPng(file);
+  return post({ dataBase64: await toBase64(png), contentType: 'image/png', project });
 };
 
-// The server downloads the image; when the image host refuses it, the browser tries (needs CORS on the image host).
-export const hostImage = async (url: string, project = ''): Promise<string> => {
-  if (isHostedImage(url)) return url;
-  try {
-    return await post({ sourceUrl: url, project });
-  } catch (serverError: any) {
-    if (/access key|APP_ACCESS_KEY|Database not configured/i.test(serverError?.message || '')) throw serverError;
-    try {
-      const r = await fetch(url, { mode: 'cors', credentials: 'omit' });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const blob = await r.blob();
-      if (!blob.type.startsWith('image/')) throw new Error('not an image');
-      return await uploadImageFile(blob, project);
-    } catch {
-      throw serverError;
-    }
+// Image bytes: own hosted image directly, else downloaded by the server, else by the browser (needs CORS).
+const download = async (url: string): Promise<Blob> => {
+  if (isHostedImage(url)) {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.blob();
   }
+  const r = await fetch('/api/image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-App-Key': getAccessKey() },
+    body: JSON.stringify({ fetchUrl: url }),
+  });
+  if (r.ok) return r.blob();
+  const serverError = new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+  if (r.status === 401 || r.status === 503) throw serverError;
+  try {
+    const b = await fetch(url, { mode: 'cors', credentials: 'omit' });
+    if (!b.ok) throw new Error(`HTTP ${b.status}`);
+    return await b.blob();
+  } catch {
+    throw serverError;
+  }
+};
+
+// Copies an image to the database as PNG and returns its public URL (<app>/img/<id>.png).
+export const hostImage = async (url: string, project = ''): Promise<string> => {
+  if (isHostedPng(url)) return url;
+  const blob = await download(url);
+  if (blob.type && !blob.type.startsWith('image/')) throw new Error(`Not an image (${blob.type})`);
+  return uploadImageFile(blob, project);
 };
 
 export interface HostingReport {
@@ -89,7 +108,7 @@ export interface HostingReport {
 export const hostImages = async (
   urls: string[], project: string, onProgress?: (done: number, total: number) => void
 ): Promise<{ map: Map<string, string>; report: HostingReport }> => {
-  const todo = [...new Set(urls.filter(u => /^https?:\/\//i.test(u) && !isHostedImage(u)))];
+  const todo = [...new Set(urls.filter(needsHosting))];
   const map = new Map<string, string>();
   const report: HostingReport = { copied: 0, failed: [] };
   let next = 0, done = 0;

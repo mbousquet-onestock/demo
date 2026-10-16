@@ -360,7 +360,7 @@ const StepResults: React.FC<StepResultsProps> = ({
                   urls={productImageUrls(products.filter(p => selectedIds.has(p.id)))}
                   project={source?.project || getLastProject()}
                   onDone={map => replaceProductImages(products.filter(p => selectedIds.has(p.id)), map).forEach(onUpdateProduct)}
-                  label="Copy images to DB"
+                  label="Images → PNG"
                   className="px-2.5 py-1.5 text-[11px] font-bold text-gray-700 rounded-md hover:bg-white disabled:opacity-40"
                 />
                 <button onClick={() => onSelectionChange(new Set())} title="Clear the selection" className="px-2 py-1.5 text-[11px] text-gray-400 hover:text-gray-700">✕</button>

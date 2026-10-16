@@ -1,5 +1,6 @@
 // Images copied to the database (Neon), served at a public URL for the OneStock /items payloads.
 //   POST /api/image (X-App-Key)  { sourceUrl } or { dataBase64, contentType }  → { id, url, contentType, size }
+//   POST /api/image (X-App-Key)  { fetchUrl }  → the image bytes (the app converts them to PNG, then stores them)
 //   GET  /img/<id>.<ext>  (public, rewritten to /api/image?id=<id>)            → the image
 //   GET    /api/image?list=projects (X-App-Key)            → image count / size per project
 //   GET    /api/image?list=images&project=<p> (X-App-Key)  → images of a project (and its sub-folders "p/…")
@@ -189,7 +190,16 @@ export const handleImageRequest = async (request: Request): Promise<Response> =>
     if (request.method === 'POST') {
       if (!process.env.APP_ACCESS_KEY) return json(503, { error: 'APP_ACCESS_KEY is not set on the server.' });
       if (!isAuthorized(request)) return json(401, { error: 'Invalid or missing access key.' });
-      const body = await request.json().catch(() => null) as { sourceUrl?: unknown; dataBase64?: unknown; contentType?: unknown; project?: unknown } | null;
+      const body = await request.json().catch(() => null) as { sourceUrl?: unknown; fetchUrl?: unknown; dataBase64?: unknown; contentType?: unknown; project?: unknown } | null;
+      // { fetchUrl }: returns the image bytes to the browser (converted to PNG there before being stored).
+      if (body && typeof body.fetchUrl === 'string') {
+        try {
+          const fetched = await fetchImage(body.fetchUrl.slice(0, 2000));
+          return new Response(fetched.bytes, { status: 200, headers: { 'Content-Type': fetched.contentType, 'Cache-Control': 'no-store' } });
+        } catch (err: any) {
+          return json(502, { error: `Image not downloaded: ${err?.message || err}` });
+        }
+      }
       let image: { bytes: Buffer; contentType: string };
       let sourceUrl: string | null = null;
       if (body && typeof body.sourceUrl === 'string') {

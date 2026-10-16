@@ -66,9 +66,10 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
   Variants are read from the schema.org data (hasVariant, one offer per SKU, Product objects of the same group), from the
   product JSON of the page (Shopify, Magento, themes), from the Shopify product API (`/products/<handle>.js`, bookmarklet)
   or, as a last resort, from the size / colour selectors of the page (then SKU = parent id + colour + size).
-  **Copy images to database** (Product Manager and capture panel): the images are downloaded by the server (public
-  hosts only, 4 MB max; the browser retries when the host refuses the server), stored in the `app_images` table and
-  served publicly at `https://<app>/img/<sha256>.<ext>`; the product image URLs (`image`, `images_big`) used by the
+  **Images → PNG / Copy images as PNG** (Product Manager and capture panel): the images are downloaded by the server
+  (public hosts only, 4 MB max; the browser retries when the host refuses the server), converted to PNG in the browser
+  (2000 px max, under 3 MB), stored in the `app_images` table and served publicly at `https://<app>/img/<sha256>.png`
+  (images already copied in another format are converted too); the product image URLs (`image`, `images_big`) used by the
   `PATCH /items` payload are replaced by these URLs. Each image is filed under the project it was copied for (an image
   can belong to several projects); the Projects tab lists the images of a folder (and its sub-folders) and deletes them
   one by one or in bulk (an image still used by another project is kept), and renaming a folder renames its images. The app domain must be publicly reachable by OneStock (no Vercel

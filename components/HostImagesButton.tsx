@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { hostImages, isLocalOrigin, HostingReport } from '../services/imageHosting';
+import { hostImages, isLocalOrigin, needsHosting, HostingReport } from '../services/imageHosting';
 
 interface Props {
   // Image URLs to copy (already hosted ones are skipped).
@@ -13,7 +13,7 @@ interface Props {
 }
 
 // Copies the images to the app database and swaps the product image URLs for <app>/img/<id>.<ext>.
-const HostImagesButton: React.FC<Props> = ({ urls, onDone, project = '', label = 'Copy images to database', className }) => {
+const HostImagesButton: React.FC<Props> = ({ urls, onDone, project = '', label = 'Copy images as PNG', className }) => {
   const [progress, setProgress] = useState<string | null>(null);
   const [report, setReport] = useState<HostingReport | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -34,20 +34,20 @@ const HostImagesButton: React.FC<Props> = ({ urls, onDone, project = '', label =
     }
   };
 
-  const pending = new Set(urls.filter(u => /^https?:\/\//i.test(u) && !u.startsWith(`${window.location.origin}/img/`))).size;
+  const pending = new Set(urls.filter(needsHosting)).size;
   return (
     <span className="inline-flex flex-col gap-1">
       <button
         onClick={run}
         disabled={!!progress || pending === 0}
-        title={`${pending ? `${pending} image(s) not hosted yet` : 'All images are already hosted'} · project: ${project.trim() || 'none'}`}
+        title={`${pending ? `${pending} image(s) not yet copied as PNG` : 'All images are already hosted as PNG'} · project: ${project.trim() || 'none'}`}
         className={className || 'px-3 py-2 text-xs font-bold text-onestock-blue border border-onestock-blue rounded-lg hover:bg-blue-50 transition-all disabled:opacity-40'}
       >
         {progress ? `Copying images ${progress}` : `${label}${pending ? ` (${pending})` : ''}`}
       </button>
       {report && (
         <span className={`text-[10px] ${report.failed.length ? 'text-amber-700' : 'text-emerald-700'}`} title={report.failed.map(f => `${f.url}: ${f.error}`).join('\n')}>
-          {report.copied} image(s) copied{project.trim() ? ` to ${project.trim()}` : ''}{report.failed.length ? ` · ${report.failed.length} failed (hover for details)` : ''}
+          {report.copied} image(s) copied as PNG{project.trim() ? ` to ${project.trim()}` : ''}{report.failed.length ? ` · ${report.failed.length} failed (hover for details)` : ''}
         </span>
       )}
       {error && <span className="text-[10px] text-red-600">{error}</span>}
