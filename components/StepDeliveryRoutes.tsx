@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   deliveryConfigStore, loadDeliveryConfig, matchZone, placeOfEndpoint, zoneSummary, carrierLabel, transitLabel,
-  fetchItemStock, savedImportStock, analyseDelivery, VERDICT_LABELS, EndpointAnalysis, StockLine, Verdict, RouteEndpoint,
+  fetchItemStock, savedImportStock, analyseDelivery, nextOpenings, VERDICT_LABELS, EndpointAnalysis, StockLine, Verdict, RouteEndpoint,
 } from '../services/deliveryRouteService';
 import { useApiTarget, missingTargetFields } from '../services/onestockClient';
 import DeliveryRoutesGraph from './DeliveryRoutesGraph';
@@ -222,6 +222,13 @@ const StepDeliveryRoutes: React.FC = () => {
                     ))}
                     {stockNotice && <span className="w-full text-[11px] text-gray-400">{stockNotice}</span>}
                   </div>
+                  {withStock.some(a => a.opening) && (
+                    <p className={`${card} p-4 text-sm text-amber-800`}>
+                      ⚠ {withStock.filter(a => a.opening).length} stock point(s) with stock have an opening hours problem
+                      ({withStock.filter(a => a.opening).slice(0, 5).map(a => `${(a.endpoint as RouteEndpoint).name || a.endpoint.id}: ${a.opening}`).join(' ; ')}):
+                      the promise may fail (beyond_time_limit / no_eligible_route) even when the routes exist.
+                    </p>
+                  )}
                   {withStock.length === 0 ? (
                     <p className={`${card} p-6 text-sm text-red-700`}>No stock found for this article: no stock point can deliver it.</p>
                   ) : counts.get('deliverable') ? null : (
@@ -246,7 +253,11 @@ const StepDeliveryRoutes: React.FC = () => {
                             <td className="px-4 py-2 w-56"><p className="font-bold text-gray-900">{(a.endpoint as RouteEndpoint).name || a.endpoint.id}</p><p className="font-mono text-gray-400">{a.endpoint.id}</p></td>
                             <td className="px-2 py-2 w-16 text-right font-mono">{a.quantity}</td>
                             <td className="px-4 py-2 w-48"><span className="text-[10px] font-bold px-2 py-0.5 rounded text-white" style={{ background: VERDICT_LABELS[a.verdict].color }}>{VERDICT_LABELS[a.verdict].label}</span></td>
-                            <td className="px-4 py-2 text-gray-600">{a.explanation}</td>
+                            <td className="px-4 py-2 text-gray-600">
+                              {a.explanation}
+                              {a.opening && a.quantity > 0 && <p className="text-amber-700 font-bold">⚠ Opening hours: {a.opening}</p>}
+                              {!a.opening && a.quantity > 0 && nextOpenings(a.endpoint as RouteEndpoint) && <p className="text-gray-400">Opens: {nextOpenings(a.endpoint as RouteEndpoint)}</p>}
+                            </td>
                           </tr>
                         ))}
                       </tbody>

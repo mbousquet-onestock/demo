@@ -3,6 +3,9 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { EndpointAnalysis, RouteEndpoint, VERDICT_LABELS } from '../services/deliveryRouteService';
 
+// Names come from the API: escaped before going into the tooltip HTML.
+const esc = (v: unknown) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+
 interface Props {
   analyses: EndpointAnalysis[];
   onSelect?: (id: string) => void;
@@ -42,7 +45,7 @@ const DeliveryMap: React.FC<Props> = ({ analyses, onSelect }) => {
         fillOpacity: a.verdict === 'no-stock' ? 0.5 : 0.95,
       });
       const name = (a.endpoint as RouteEndpoint).name || a.endpoint.id;
-      marker.bindTooltip(`<b>${name}</b> (${a.endpoint.id})<br>Stock: ${a.quantity}<br><span style="color:${v.color}">${v.label}</span>`);
+      marker.bindTooltip(`<b>${esc(name)}</b> (${esc(a.endpoint.id)})<br>Stock: ${esc(a.quantity)}<br><span style="color:${v.color}">${v.label}</span>${a.opening && a.quantity > 0 ? `<br><span style="color:#B45309">⚠ ${esc(a.opening)}</span>` : ''}`);
       if (onSelect) marker.on('click', () => onSelect(a.endpoint.id));
       marker.addTo(layer);
       if (a.verdict !== 'no-stock') points.push([lat, lon]);

@@ -63,7 +63,10 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
   **Delivery promise**: runs `GET /delivery_promises` for the item / destination (sales channel, delivery methods, qty,
   `debug.all`, fields `delivery_options.delivery_routes` / `excluded_line_items`; the payload can be edited) and shows
   per delivery option the status, ETA, routes used (matched with the configured routes), the failure reason with its
-  meaning and what to check, compared with the local analysis, plus the debug data; the call can be saved.
+  meaning and what to check, compared with the local analysis, plus the debug data; the call can be saved. Per delivery
+  method: the stock returned by its stock request (`debug.stocks`) and the delivery restrictions
+  (`debug.delivery_restrictions`). Opening hours of the stock points with stock (`open`, next 7 days opening slots) are
+  checked and reported as a possible cause (beyond_time_limit, no_eligible_route).
 - **Manual Steps**: checklist of the steps to perform by hand (OMC configuration, checks…), per project: status
   (to do / in progress / done), details, ordering, progress, copy as a Markdown checklist; synced to the database.
 - **API Explorer**: all GET routes of the OneStock spec (`data/onestockGetEndpoints.json`, generated from the

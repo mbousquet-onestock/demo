@@ -50,7 +50,31 @@ export interface RouteEndpoint {
     regions?: { country?: { code?: string }; state?: { code?: string } };
   };
   classification?: { endpoint_type?: string[] };
+  opening_hours?: { id?: string; timespans?: unknown[]; timezone?: string; type?: string };
+  opening_hours_next_seven_days?: { opening_hours?: any[] };
 }
+
+// Opening problem of a stock point (closed, no opening in the next 7 days, no timetable), '' when none is visible.
+export const openingIssue = (ep: RouteEndpoint): string => {
+  if (ep.open === false) return 'closed (open: false)';
+  const next = ep.opening_hours_next_seven_days?.opening_hours;
+  if (Array.isArray(next)) {
+    const slots = next.filter(x => x && (typeof x !== 'object' || !Array.isArray(x) || x.length));
+    if (slots.length === 0) return 'no opening in the next 7 days';
+  }
+  if (ep.opening_hours && Array.isArray(ep.opening_hours.timespans) && ep.opening_hours.timespans.length === 0) return 'opening hours without timespan';
+  return '';
+};
+
+// Opening slots of the next 7 days, as returned by OneStock (for display).
+export const nextOpenings = (ep: RouteEndpoint): string => {
+  const next = ep.opening_hours_next_seven_days?.opening_hours;
+  if (!Array.isArray(next)) return '';
+  const fmt = (v: any) => (typeof v === 'number' ? new Date(v * 1000).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : String(v));
+  return next.slice(0, 4).map(x => (x && typeof x === 'object' && !Array.isArray(x)
+    ? [x.start ?? x.from ?? x.open, x.end ?? x.to ?? x.close].filter(v => v !== undefined).map(fmt).join(' → ') || JSON.stringify(x)
+    : Array.isArray(x) ? x.map(fmt).join(' → ') : fmt(x))).join(' · ');
+};
 
 export interface DeliveryConfig {
   routes: DeliveryRoute[];
@@ -92,7 +116,8 @@ export const fetchEndpoints = async (onProgress?: (n: number) => void): Promise<
   const limit = 100;
   for (let start = 0; start < 20000; start += limit) {
     const body = await get('/endpoints', {
-      fields: ['id', 'name', 'address', 'classification', 'timezone', 'open'],
+      // The id is always returned ("id" is not an accepted field).
+      fields: ['name', 'address', 'classification', 'timezone', 'open', 'opening_hours', 'opening_hours_next_seven_days'],
       pagination: { start, limit },
     }, v3OrV4());
     const page = arrayIn(body, ['endpoints']);
@@ -246,6 +271,8 @@ export interface EndpointAnalysis {
   deliveringRoutes: DeliveryRoute[];
   verdict: Verdict;
   explanation: string;
+  // Closed / no opening hours: may prevent the promise (timetables) even when the routes exist.
+  opening: string;
 }
 
 export const VERDICT_LABELS: Record<Verdict, { label: string; color: string }> = {
@@ -300,6 +327,7 @@ export const analyseDelivery = (
       verdict = 'deliverable';
       explanation = `Via ${deliveringRoutes.map(r => `${carrierLabel(r)}${transitLabel(r) ? ` (${transitLabel(r)})` : ''}`).join(', ')}.`;
     }
-    return { endpoint, quantity, originZones, routes, deliveringRoutes, verdict, explanation };
+    const opening = endpointsById.has(id) ? openingIssue(endpoint as RouteEndpoint) : '';
+    return { endpoint, quantity, originZones, routes, deliveringRoutes, verdict, explanation, opening };
   });
 };

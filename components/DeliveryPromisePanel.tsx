@@ -22,8 +22,8 @@ const STATUS_COLORS: Record<string, string> = {
 const REASONS: Record<string, { meaning: string; check: string }> = {
   no_stock: { meaning: 'Not enough stock available, or the item is restricted for this delivery method.', check: 'Stock of the item in the stock points of the origin zones; item restrictions of the delivery method; stock reservations / buffers.' },
   missing_config: { meaning: 'The combination destination + sales channel + delivery method is not configured.', check: 'Delivery configuration of this sales channel and delivery method; destination zone matching the address (country / zip).' },
-  beyond_time_limit: { meaning: 'Cannot be fulfilled within a reasonable timeframe (stock point or carrier timetable).', check: 'Opening / pickup / delivery timetables of the routes and the stock points opening hours.' },
-  no_eligible_route: { meaning: 'Every eligible route was discarded after applying the configured constraints.', check: 'Order / parcel constraints of the routes reaching the destination; routes from the zones of the stock points with stock.' },
+  beyond_time_limit: { meaning: 'Cannot be fulfilled within a reasonable timeframe (stock point or carrier timetable).', check: 'Opening hours of the stock points with stock (closed, no opening in the next days), then the opening / pickup / delivery timetables of the routes.' },
+  no_eligible_route: { meaning: 'Every eligible route was discarded after applying the configured constraints.', check: 'Order / parcel constraints of the routes reaching the destination; routes from the zones of the stock points with stock; opening hours of these stock points.' },
   estimation_degraded_mode: { meaning: 'The stock repartitions exceed the computation limits.', check: 'Too many stock points / combinations: number of stock points with stock, maximum shipments.' },
   failed_parcel_constraints: { meaning: 'No route can handle the parcel.', check: 'Parcel constraints (weight, dimensions formulas) of the routes vs the item weight / dimensions.' },
   failed_parcel_contraints: { meaning: 'No route can handle the parcel.', check: 'Parcel constraints (weight, dimensions formulas) of the routes vs the item weight / dimensions.' },
@@ -32,6 +32,42 @@ const REASONS: Record<string, { meaning: string; check: string }> = {
   exceeds_authorized_shipment_number: { meaning: 'No promise within the configured maximum number of shipments.', check: 'Authorized shipment number; stock split over several stock points.' },
   missing_destination_timetable: { meaning: 'No destination timetable found to compute the ETA.', check: 'Delivery timetable of the routes reaching the destination.' },
 };
+
+
+// ---- Debug data of the answer (format not documented: searched by key name, possibly grouped by delivery method)
+const findByKey = (node: any, re: RegExp, depth = 0, path = ''): { path: string; value: any }[] => {
+  if (!node || typeof node !== 'object' || depth > 8) return [];
+  if (Array.isArray(node)) return node.flatMap((x, i) => findByKey(x, re, depth + 1, `${path}[${i}]`));
+  return Object.entries(node).flatMap(([k, v]) => (re.test(k)
+    ? [{ path: path ? `${path}.${k}` : k, value: v }]
+    : findByKey(v, re, depth + 1, path ? `${path}.${k}` : k)));
+};
+// Value for one delivery method when the debug data is grouped by method ({ standard: …, express: … }).
+const forMethod = (value: any, method: string, methods: string[]) =>
+  value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).some(k => methods.includes(k)) ? value[method] : value;
+
+interface StockRow { endpoint: string; item: string; quantity: number | string; type?: string; eta?: string }
+const stockRows = (value: any): StockRow[] => {
+  const rows: StockRow[] = [];
+  const walk = (n: any, depth: number, endpointKey?: string) => {
+    if (!n || typeof n !== 'object' || depth > 8) return;
+    if (Array.isArray(n)) { n.forEach(x => walk(x, depth + 1, endpointKey)); return; }
+    const endpoint = n.endpoint_id ?? n.endpoint ?? n.stock_location_id ?? endpointKey;
+    const quantity = n.quantity ?? n.qty ?? n.available ?? n.stock;
+    if (endpoint !== undefined && (typeof quantity === 'number' || typeof quantity === 'string')) {
+      rows.push({
+        endpoint: String(endpoint), item: String(n.item_id ?? n.item ?? n.id ?? ''), quantity,
+        type: n.type ?? n.stock_type, eta: n.eta_end ? new Date(n.eta_end * 1000).toLocaleDateString() : undefined,
+      });
+      return;
+    }
+    // { <endpoint id>: { quantity } } maps
+    Object.entries(n).forEach(([k, v]) => walk(v, depth + 1, v && typeof v === 'object' && !Array.isArray(v) && ('quantity' in (v as any) || 'qty' in (v as any)) ? k : endpointKey));
+  };
+  walk(value, 0);
+  return rows;
+};
+const isEmpty = (v: any) => v === null || v === undefined || (Array.isArray(v) && v.length === 0) || (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0);
 
 const fmt = (t?: number) => (t ? new Date(t * 1000).toLocaleString() : '—');
 
@@ -73,7 +109,7 @@ const DeliveryPromisePanel: React.FC<Props> = ({ config, itemId, country, zip, a
     sales_channel: salesChannel,
     delivery_options: methods.split(',').map(m => m.trim()).filter(Boolean).map(delivery_method => ({ delivery_method, destination: { location } })),
     pricing_details: { price: 0 },
-    ...(debug ? { debug: { all: true } } : {}),
+    ...(debug ? { debug: { all: true, delivery_routes: true, delivery_restrictions: true, stocks: { all: true } } } : {}),
   };
   // The payload follows the form until it is edited by hand.
   useEffect(() => { setEdited(null); }, [itemId, country, zip]);
@@ -102,6 +138,15 @@ const DeliveryPromisePanel: React.FC<Props> = ({ config, itemId, country, zip, a
   };
 
   const options: any[] = Array.isArray(result?.body?.delivery_options) ? result!.body.delivery_options : [];
+  const methodList = options.map(o => String(o.delivery_method || ''));
+  // Debug outside the delivery options (top level).
+  const globalPart = result?.body && typeof result.body === 'object' ? Object.fromEntries(Object.entries(result.body).filter(([k]) => k !== 'delivery_options')) : {};
+  const debugOf = (o: any, re: RegExp) => {
+    const own = findByKey(o, re);
+    if (own.length) return own;
+    return findByKey(globalPart, re).map(f => ({ ...f, value: forMethod(f.value, String(o.delivery_method || ''), methodList) }));
+  };
+  const endpointName = (id: string) => config.endpoints.find(e => e.id === id)?.name;
   const extraKeys = result?.body && typeof result.body === 'object' ? Object.keys(result.body).filter(k => k !== 'delivery_options') : [];
   const withStock = analyses.filter(a => a.quantity > 0);
   const deliverable = analyses.filter(a => a.verdict === 'deliverable');
@@ -185,10 +230,62 @@ const DeliveryPromisePanel: React.FC<Props> = ({ config, itemId, country, zip, a
                     })}
                   </div>
                 )}
+                {(() => {
+                  const stocks = debugOf(o, /^(stocks?|stock_repartitions?)$/i);
+                  const rows = stocks.flatMap(f => stockRows(f.value));
+                  const total = rows.reduce((n, r) => n + (Number(r.quantity) || 0), 0);
+                  const restrictions = debugOf(o, /restriction/i);
+                  return (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                      <div className="border border-gray-100 rounded-lg p-3">
+                        <p className="font-bold text-gray-500 mb-1">Stock of the delivery method's stock request{rows.length ? ` · ${rows.length} line(s), total ${total}` : ''}</p>
+                        {stocks.length === 0 ? <p className="text-gray-400">Not returned (enable Debug).</p>
+                          : rows.length === 0 ? <p className="text-amber-700">No stock line returned: the stock request of this delivery method finds no stock for the item.</p> : (
+                            <table className="w-full text-[11px]">
+                              <thead><tr className="text-left text-gray-400"><th>Stock point</th><th>Item</th><th className="text-right">Qty</th><th>Type</th></tr></thead>
+                              <tbody>
+                                {rows.slice(0, 200).map((r, k) => (
+                                  <tr key={k} className="border-t border-gray-50">
+                                    <td>{endpointName(r.endpoint) ? <>{endpointName(r.endpoint)} <span className="font-mono text-gray-400">{r.endpoint}</span></> : <span className="font-mono">{r.endpoint}</span>}</td>
+                                    <td className="font-mono">{r.item}</td>
+                                    <td className={`text-right font-mono ${Number(r.quantity) > 0 ? 'text-emerald-700' : 'text-red-600'}`}>{r.quantity}</td>
+                                    <td>{r.type}{r.eta ? ` · ${r.eta}` : ''}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        {stocks.length > 0 && <details className="mt-1"><summary className="text-[10px] text-gray-400 cursor-pointer">Raw ({stocks.map(f => f.path).join(', ')})</summary><pre className="max-h-60 overflow-auto text-[10px] whitespace-pre-wrap break-all">{JSON.stringify(stocks.map(f => f.value), null, 2)}</pre></details>}
+                      </div>
+                      <div className="border border-gray-100 rounded-lg p-3">
+                        <p className="font-bold text-gray-500 mb-1">Delivery restrictions</p>
+                        {restrictions.length === 0 ? <p className="text-gray-400">Not returned (enable Debug).</p>
+                          : restrictions.every(f => isEmpty(f.value)) ? <p className="text-emerald-700">No delivery restriction.</p> : (
+                            <div className="space-y-1">
+                              {restrictions.filter(f => !isEmpty(f.value)).flatMap(f => (Array.isArray(f.value) ? f.value : [f.value]).map((r: any, k: number) => (
+                                <div key={`${f.path}-${k}`} className="p-2 bg-amber-50 border border-amber-100 rounded text-[11px]">
+                                  {r && typeof r === 'object'
+                                    ? Object.entries(r).map(([rk, rv]) => <p key={rk}><span className="text-gray-500">{rk}:</span> <span className="font-mono break-all">{typeof rv === 'object' ? JSON.stringify(rv) : String(rv)}</span></p>)
+                                    : <span className="font-mono">{String(r)}</span>}
+                                </div>
+                              )))}
+                              <p className="text-[10px] text-gray-400">{restrictions.map(f => f.path).join(', ')}</p>
+                            </div>
+                          )}
+                      </div>
+                    </div>
+                  );
+                })()}
                 {reason && (
                   <div className="p-3 bg-red-50 border border-red-100 rounded-lg space-y-1">
                     <p className="text-red-800"><strong>Why:</strong> {reason.meaning}</p>
                     <p className="text-red-800"><strong>Check:</strong> {reason.check}</p>
+                    {['beyond_time_limit', 'no_eligible_route', 'missing_destination_timetable', 'no_stock'].includes(o.reason) && withStock.some(a => a.opening) && (
+                      <p className="text-amber-800">Opening hours: {withStock.filter(a => a.opening).map(a => `${(a.endpoint as any).name || a.endpoint.id} ${a.opening}`).join(' ; ')}.</p>
+                    )}
+                    {['beyond_time_limit', 'no_eligible_route'].includes(o.reason) && withStock.length > 0 && !withStock.some(a => a.opening) && (
+                      <p className="text-gray-700">The stock points with stock have opening hours in the next 7 days: look at the route timetables.</p>
+                    )}
                     {o.reason === 'no_stock' && <p className="text-gray-700">Analysis above: {withStock.length} stock point(s) with stock, {deliverable.length} able to deliver this destination.</p>}
                     {(o.reason === 'no_eligible_route' || o.reason === 'missing_config') && (
                       <p className="text-gray-700">
