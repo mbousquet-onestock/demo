@@ -249,18 +249,31 @@ export function captureRuntime(opts: { app?: string; doc?: Document; url?: strin
         if (m) add(m[1], m[2]);
       });
 
+      // Gallery images: only the gallery block holding the main image (not the recommendations / other products).
       const gallery = /gallery|galerie|carousel|slider|swiper|product[-_]?(image|media|photo)|pdp|zoom|thumbnails|visuel/i;
-      const imgs: string[] = [];
+      const galleryOf = (el: Element): Element | null => {
+        let e: Element | null = el;
+        for (let i = 0; e && i < 6; i++, e = e.parentElement) if (gallery.test(`${e.id} ${e.getAttribute('class') || ''}`)) return e;
+        return null;
+      };
+      const stem = (u: string) => (u.split(/[?#]/)[0].split('/').pop() || '').toLowerCase()
+        .replace(/\.(jpe?g|png|webp|avif|gif)$/, '').replace(/[_-](\d{2,4}x\d{0,4}|\d{2,4}w|large|medium|small|grande|master|zoom|thumb)$/, '');
+      const found2: { el: Element; url: string; box: Element }[] = [];
       doc.querySelectorAll('img, source').forEach(img => {
-        let e: Element | null = img, ok = false;
-        for (let i = 0; e && i < 6; i++, e = e.parentElement) if (gallery.test(`${e.id} ${e.getAttribute('class') || ''}`)) { ok = true; break; }
-        if (!ok) return;
+        const box = galleryOf(img);
+        if (!box) return;
         const srcset = (img.getAttribute('srcset') || img.getAttribute('data-srcset') || '').split(',').map(s => s.trim().split(/\s+/)[0]).filter(Boolean);
         const candidates = [img.getAttribute('data-zoom-image'), img.getAttribute('data-large'), img.getAttribute('data-full'), srcset[srcset.length - 1], img.getAttribute('data-src'), img.getAttribute('src')];
         const u = candidates.map(c => abs(c, pageUrl)).find(Boolean);
-        if (u && !/logo|icon|sprite|placeholder|loader|blank|\.svg(\?|$)|data:/i.test(u)) imgs.push(u);
+        if (u && !/logo|icon|sprite|placeholder|loader|blank|\.svg(\?|$)|data:/i.test(u)) found2.push({ el: img, url: u, box });
       });
-      p.images = uniq([...p.images, ...imgs, abs(meta('og:image'), pageUrl)]);
+      const main = p.images[0] || abs(meta('og:image'), pageUrl);
+      const mainStem = main ? stem(main) : '';
+      const holder = found2.find(x => mainStem && stem(x.url) === mainStem);
+      // Main image not in a gallery: the gallery is only trusted when the product has no structured image.
+      const box = holder ? holder.box : p.images.length === 0 && found2.length ? found2[0].box : null;
+      const galleryImgs = box ? found2.filter(x => box.contains(x.el)).map(x => x.url) : [];
+      p.images = uniq([...(main ? [main] : []), ...p.images, ...galleryImgs]);
       if (!p.description) {
         const d = Array.from(doc.querySelectorAll('[class*="description" i], [id*="description" i]'))
           .map(e => clean(e.textContent)).find(t => t.length >= 40);
@@ -348,7 +361,7 @@ export function captureRuntime(opts: { app?: string; doc?: Document; url?: strin
 
     const products = found.filter(p => p.name || p.sku).map(p => ({
       ...p,
-      images: uniq(p.images).slice(0, 20),
+      images: uniq(p.images).slice(0, 30),
       currency: p.currency || meta('product:price:currency'),
       page: pageUrl,
       capturedAt: new Date().toISOString(),
@@ -494,6 +507,46 @@ export const parseCaptureInput = (input: string, url: string): { products: Captu
   return { products: sanitizeCaptured(result.products, base), links: result.links };
 };
 
+// ---- Images of an article: at most 4, all related to the main image (first one).
+const SIZE_SUFFIX = /[_-](\d{2,4}x\d{0,4}|\d{2,4}w|large|medium|small|grande|master|zoom|thumb|original)$/;
+const imageParts = (u: string) => {
+  try {
+    const x = new URL(u);
+    const segments = x.pathname.split('/').filter(Boolean);
+    const last = segments.pop() || '';
+    // Resizing folders: Cloudinary transformations (w_800,h_800,c_fill), 800x800.
+    const dirs = segments.filter(seg => !/^([a-z]{1,2}_[a-z0-9.:]+,?)+$/i.test(seg) && !/^\d{2,4}x\d{0,4}$/.test(seg));
+    const file = last.toLowerCase().replace(/\.(jpe?g|png|webp|avif|gif)$/, '').replace(SIZE_SUFFIX, '');
+    return { host: x.host, dir: dirs.join('/').toLowerCase(), file };
+  } catch { return { host: '', dir: '', file: u }; }
+};
+const NOISE = new Set(['large', 'small', 'medium', 'zoom', 'main', 'thumb', 'image', 'images', 'product', 'products', 'photo', 'photos', 'default', 'master', 'original', 'front', 'back', 'grande', 'width', 'height', 'jpeg', 'webp', 'file', 'files', 'media', 'shop', 'store', 'catalog', 'visuel', 'packshot']);
+const tokensOf = (file: string) => file.split(/[^a-z0-9]+/).filter(t => t.length >= 4 && !NOISE.has(t) && !(/^\d+$/.test(t) && t.length < 5));
+// Same image in another size = same key.
+const imageKey = (u: string) => { const p = imageParts(u); return `${p.host}/${p.dir}/${p.file}`; };
+
+export const MAX_ARTICLE_IMAGES = 4;
+export const pickImages = (images: string[], main = images[0], max = MAX_ARTICLE_IMAGES): string[] => {
+  if (!main) return [];
+  const m = imageParts(main);
+  let mainTokens = tokensOf(m.file);
+  // No other image shares a reference with the main one (hash file names): the folder decides.
+  if (!images.some(u => u !== main && imageKey(u) !== imageKey(main) && tokensOf(imageParts(u).file).some(t => mainTokens.includes(t)))) mainTokens = [];
+  const keys = new Set<string>();
+  return [main, ...images].filter(u => {
+    if (!u) return false;
+    const key = imageKey(u);
+    if (keys.has(key)) return false;
+    const p = imageParts(u);
+    const related = u === main || (p.host === m.host && (
+      // A reference in the main file name (SKU, product id): the same one is required; else the same folder.
+      mainTokens.length ? tokensOf(p.file).some(t => mainTokens.includes(t)) : p.dir === m.dir));
+    if (!related) return false;
+    keys.add(key);
+    return true;
+  }).slice(0, max);
+};
+
 // Captured data comes from another website: keep known fields, strings only, http(s) URLs only.
 const str = (v: unknown, max = 4000) => (typeof v === 'string' || typeof v === 'number' ? String(v).slice(0, max) : '');
 const url = (v: unknown) => {
@@ -508,7 +561,7 @@ export const sanitizeCaptured = (products: unknown, page = ''): CapturedProduct[
     productGroupId: str(p.productGroupId, 120),
     brand: str(p.brand, 120),
     description: str(p.description),
-    images: (Array.isArray(p.images) ? p.images : []).map(url).filter(Boolean).slice(0, 20),
+    images: pickImages((Array.isArray(p.images) ? p.images : []).map(url).filter(Boolean)),
     url: url(p.url),
     page: url(p.page) || url(page),
     price: str(p.price, 40),
@@ -544,7 +597,8 @@ export const capturedToProducts = (captured: CapturedProduct[], defaultCurrency 
       // Variants without SKU (read from the size / colour selectors): parent id + colour + size.
       const suffix = [v.color, v.size].filter(Boolean).map(x => featureKey(x).toUpperCase()).join('-');
       const sku = v.sku || v.gtin || (c.variants.length ? `${parentSku}-${suffix || index}` : parentSku);
-      const images = [v.image, ...c.images].filter((x, i, a) => x && a.indexOf(x) === i);
+      // Variant with its own image (a colour): the images related to it, else the product images.
+      const images = pickImages([v.image, ...c.images].filter(Boolean), v.image || c.images[0]);
       const color = v.color || c.color || char(/colou?r|couleur/i);
       const size = v.size || c.size || char(/size|taille|pointure/i);
       const price = v.price || c.price;

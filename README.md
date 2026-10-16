@@ -63,6 +63,8 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
   data (schema.org JSON-LD / microdata, OpenGraph) plus specification tables, gallery images and description; the page
   source can also be pasted. Captures (images as URLs, description, characteristics, variants with EAN / price) are
   saved per project in the database (`product_captures`) and become Product Manager articles (one per variant).
+  Images: at most 4 per article, all related to the main image (gallery block holding the main image, same reference
+  in the file name or same folder; size duplicates merged); a variant with its own image gets the images related to it.
   Variants are read from the schema.org data (hasVariant, one offer per SKU, Product objects of the same group), from the
   product JSON of the page (Shopify, Magento, themes), from the Shopify product API (`/products/<handle>.js`, bookmarklet)
   or, as a last resort, from the size / colour selectors of the page (then SKU = parent id + colour + size).
