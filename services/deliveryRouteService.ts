@@ -76,10 +76,20 @@ export const nextOpenings = (ep: RouteEndpoint): string => {
     : Array.isArray(x) ? x.map(fmt).join(' → ') : fmt(x))).join(' · ');
 };
 
+export interface Timetable {
+  id: string;
+  name?: string;
+  type?: string;
+  description?: string;
+  hours?: { timezone?: string; timespans?: { start?: number; end?: number; options?: Record<string, boolean> }[] };
+}
+
 export interface DeliveryConfig {
   routes: DeliveryRoute[];
   zones: Zone[];
   endpoints: RouteEndpoint[];
+  // Timetables used by the routes (opening / pickup / delivery), by id.
+  timetables?: Record<string, Timetable>;
   loadedAt: string;
   site: string;
 }
@@ -135,7 +145,9 @@ export const loadDeliveryConfig = async (onProgress?: (text: string) => void): P
   const zones = arrayIn(await get('/zones', {}), ['zones']) as Zone[];
   onProgress?.('Reading stock points…');
   const endpoints = await fetchEndpoints(n => onProgress?.(`Reading stock points… ${n}`));
-  const config = { routes, zones, endpoints, loadedAt: new Date().toISOString(), site: getApiTarget().siteId };
+  onProgress?.('Reading route timetables…');
+  const timetables = await fetchTimetables(routeTimetableIds(routes)).catch(() => ({}));
+  const config = { routes, zones, endpoints, timetables, loadedAt: new Date().toISOString(), site: getApiTarget().siteId };
   deliveryConfigStore.set(config);
   return config;
 };
@@ -331,3 +343,91 @@ export const analyseDelivery = (
     return { endpoint, quantity, originZones, routes, deliveringRoutes, verdict, explanation, opening };
   });
 };
+
+// ---- Route timetables (activity / opening, pickup, delivery)
+
+export const TIMETABLE_KINDS = [
+  { key: 'opening_timetable_id', label: 'Activity (opening)' },
+  { key: 'pickup_timetable_id', label: 'Pickup' },
+  { key: 'delivery_timetable_id', label: 'Delivery' },
+] as const;
+export type TimetableKind = typeof TIMETABLE_KINDS[number]['key'];
+
+export const routeTimetableIds = (routes: DeliveryRoute[]) =>
+  [...new Set(routes.flatMap(r => TIMETABLE_KINDS.map(k => r[k.key])).filter(Boolean) as string[])];
+
+// GET /timetables (filters.ids), then GET /timetables/{id} for the ones not returned.
+export const fetchTimetables = async (ids: string[]): Promise<Record<string, Timetable>> => {
+  const out: Record<string, Timetable> = {};
+  if (ids.length === 0) return out;
+  for (let i = 0; i < ids.length; i += 100) {
+    try {
+      const body = await get('/timetables', { filters: { ids: ids.slice(i, i + 100) } });
+      arrayIn(body, ['timetables']).forEach((t: any) => { if (t && t.id) out[String(t.id)] = t; });
+    } catch { /* fallback below */ }
+  }
+  for (const id of ids.filter(x => !out[x])) {
+    try {
+      const body: any = await get(`/timetables/${encodeURIComponent(id)}`, {});
+      const t = body?.timetable || body;
+      if (t && typeof t === 'object') out[id] = { id, ...t };
+    } catch { /* reported as not found */ }
+  }
+  return out;
+};
+
+const WEEK = 7 * 86400;
+const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const hhmm = (sec: number) => `${String(Math.floor(sec / 3600) % 24).padStart(2, '0')}:${String(Math.floor(sec / 60) % 60).padStart(2, '0')}`;
+
+export interface TimetableReport {
+  status: 'ok' | 'not-set' | 'not-found' | 'empty' | 'partial';
+  // Weekly spans per day (0 = Monday), seconds from the start of the day.
+  days: { start: number; end: number }[][];
+  hoursPerWeek: number;
+  // Spans given as dates (exceptions / one-off openings).
+  exceptions: string[];
+  summary: string;
+}
+
+// Weekly spans are seconds from Monday 00:00 (values above one week are read as dates).
+export const timetableReport = (id: string | undefined, timetables: Record<string, Timetable> | undefined): TimetableReport => {
+  const days: { start: number; end: number }[][] = DAYS.map(() => []);
+  if (!id) return { status: 'not-set', days, hoursPerWeek: 0, exceptions: [], summary: 'not set on the route' };
+  const t = timetables?.[id];
+  if (!t) return { status: 'not-found', days, hoursPerWeek: 0, exceptions: [], summary: `timetable ${id} not found` };
+  const spans = Array.isArray(t.hours?.timespans) ? t.hours!.timespans! : [];
+  const exceptions: string[] = [];
+  let seconds = 0;
+  spans.forEach(sp => {
+    const start = Number(sp.start), end = Number(sp.end);
+    if (!isFinite(start) || !isFinite(end) || end <= start) return;
+    if (start >= WEEK * 2) {
+      const closed = sp.options && Object.entries(sp.options).filter(([, v]) => v).map(([k]) => k).join(', ');
+      exceptions.push(`${new Date(start * 1000).toLocaleString()} → ${new Date(end * 1000).toLocaleString()}${closed ? ` (${closed})` : ''}`);
+      return;
+    }
+    seconds += end - start;
+    // A span may run over several days.
+    for (let from = start; from < end;) {
+      const day = Math.floor(from / 86400) % 7;
+      const dayEnd = (Math.floor(from / 86400) + 1) * 86400;
+      const to = Math.min(end, dayEnd);
+      days[day].push({ start: from % 86400, end: to - Math.floor(from / 86400) * 86400 });
+      from = to;
+    }
+  });
+  const hoursPerWeek = Math.round(seconds / 360) / 10;
+  const openDays = days.filter(d => d.length).length;
+  const status: TimetableReport['status'] = hoursPerWeek === 0 ? 'empty' : openDays < 5 ? 'partial' : 'ok';
+  const summary = hoursPerWeek === 0
+    ? `${t.name || id}: no weekly time span${exceptions.length ? ` (${exceptions.length} dated span(s) only)` : ''}`
+    : `${t.name || id}: ${hoursPerWeek} h / week, ${openDays} day(s) · ${days.map((d, i) => (d.length ? `${DAYS[i]} ${d.map(x => `${hhmm(x.start)}-${hhmm(x.end)}`).join(',')}` : '')).filter(Boolean).join(' · ')}`;
+  return { status, days, hoursPerWeek, exceptions, summary };
+};
+
+// Timetable problems of a route (empty / missing timetables), '' when none.
+export const routeTimetableIssues = (r: DeliveryRoute, timetables: Record<string, Timetable> | undefined): string =>
+  TIMETABLE_KINDS.map(k => ({ k, rep: timetableReport(r[k.key], timetables) }))
+    .filter(({ rep }) => rep.status === 'empty' || rep.status === 'not-found')
+    .map(({ k, rep }) => `${k.label}: ${rep.summary}`).join(' ; ');

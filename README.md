@@ -55,6 +55,10 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
 - **Delivery Routes**: reads the Delivery Promise configuration of the selected site (`GET /delivery_routes`,
   `GET /zones`, `GET /endpoints`) and shows it: graph origin zones → destination zones (one colour per carrier, route
   detail with transit times, timetables and constraints), zones with their criteria and the stock points they contain.
+  Route timetables (activity / opening, pickup, delivery) are read with `GET /timetables` and shown as weekly bars
+  (spans = seconds from Monday 00:00; dated spans listed apart) with a status: OK, < 5 days, empty, not found, not set.
+  Empty / missing timetables of the routes from the stock are reported in the article analysis and as a cause of the
+  delivery promise failures (beyond_time_limit, no_eligible_route, missing_destination_timetable).
   **Article analysis**: for an item and a destination (country, zip), reads the stock per stock point (`GET /stocks`
   and/or the saved `PATCH /stock_import` payloads), then tells for each stock point whether it can deliver and why not
   (in no origin zone, no route from its zones, destination not covered by the routes), on a map and in a table.
