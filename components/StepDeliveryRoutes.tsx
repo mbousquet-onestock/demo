@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   deliveryConfigStore, loadDeliveryConfig, matchZone, placeOfEndpoint, zoneSummary, carrierLabel, transitLabel,
-  fetchItemStock, savedImportStock, analyseDelivery, nextOpenings, TIMETABLE_KINDS, timetableReport, routeTimetableIssues, transitIssue, executionTimeIssue, endpointExecutionTimes, durationMinutes, VERDICT_LABELS, EndpointAnalysis, StockLine, Verdict, RouteEndpoint,
+  fetchItemStock, savedImportStock, analyseDelivery, nextOpenings, TIMETABLE_KINDS, timetableReport, routeTimetableIssues, transitIssue, feesIssue, feesLabel, executionTimeIssue, endpointExecutionTimes, durationMinutes, VERDICT_LABELS, EndpointAnalysis, StockLine, Verdict, RouteEndpoint,
 } from '../services/deliveryRouteService';
 import { useApiTarget, missingTargetFields } from '../services/onestockClient';
 import DeliveryRoutesGraph from './DeliveryRoutesGraph';
@@ -137,7 +137,7 @@ const StepDeliveryRoutes: React.FC = () => {
                 <div className="mt-6 overflow-x-auto">
                   <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Route timetables{config.timetables === undefined && ' (reload to read them)'}</p>
                   <table className="text-[11px]">
-                    <thead><tr className="text-left text-gray-400"><th className="pr-3">Route</th><th className="pr-3">Transit</th>{TIMETABLE_KINDS.map(k => <th key={k.key} className="pr-3">{k.label}</th>)}</tr></thead>
+                    <thead><tr className="text-left text-gray-400"><th className="pr-3">Route</th><th className="pr-3">Transit</th><th className="pr-3">Fees</th>{TIMETABLE_KINDS.map(k => <th key={k.key} className="pr-3">{k.label}</th>)}</tr></thead>
                     <tbody>
                       {config.routes.map(r => (
                         <tr key={r.id} onClick={() => setSelectedRoute(r.id)} className={`cursor-pointer border-t border-gray-50 ${selectedRoute === r.id ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
@@ -145,6 +145,10 @@ const StepDeliveryRoutes: React.FC = () => {
                           <td className="pr-3 py-1.5" title={transitIssue(r) || 'min – max transit hours'}>
                             <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${transitIssue(r) ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'}`}>{transitLabel(r) || 'not set'}</span>
                             {transitIssue(r) && <p className="text-[9px] text-red-600 mt-0.5 max-w-[120px]">⚠ {transitIssue(r)}</p>}
+                          </td>
+                          <td className="pr-3 py-1.5" title={feesIssue(r) || feesLabel(r)}>
+                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${feesIssue(r) ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'}`}>{feesLabel(r) || 'not set'}</span>
+                            {feesIssue(r) && <p className="text-[9px] text-red-600 mt-0.5 max-w-[140px]">⚠ {feesIssue(r)}</p>}
                           </td>
                           {TIMETABLE_KINDS.map(k => {
                             const rep = timetableReport(r[k.key], config.timetables);
@@ -169,6 +173,8 @@ const StepDeliveryRoutes: React.FC = () => {
                     <p>Carrier: <strong>{carrierLabel(route)}</strong>{transitLabel(route) && <> · transit <strong>{transitLabel(route)}</strong></>}</p>
                     <p>Transit time: min <strong>{route.minimum_transit_hours ?? '—'} h</strong> · max <strong>{route.maximum_transit_hours ?? '—'} h</strong>
                       {transitIssue(route) && <span className="ml-2 text-red-600 font-bold">⚠ {transitIssue(route)}</span>}</p>
+                    <p>Delivery fees (metric_values): <strong>{feesLabel(route) || 'not set'}</strong>
+                      {feesIssue(route) && <span className="ml-2 text-red-600 font-bold">⚠ {feesIssue(route)}</span>}</p>
                     <div className="pt-2 border-t border-gray-100 space-y-2">
                       <p className="font-bold text-gray-500">Timetables</p>
                       {TIMETABLE_KINDS.map(k => {
@@ -344,6 +350,9 @@ const StepDeliveryRoutes: React.FC = () => {
                               {a.opening && a.quantity > 0 && <p className="text-amber-700 font-bold">⚠ Opening hours: {a.opening}</p>}
                               {a.quantity > 0 && endpointExecutionTimes(a.endpoint as RouteEndpoint, config.executionTimes).map(et => ({ et, issue: executionTimeIssue(et, config.timetables) })).filter(x => x.issue).map(x => (
                                 <p key={`e-${x.et.id}`} className="text-amber-700">⚠ Execution time {x.et.id} ({x.et.operation}): {x.issue}</p>
+                              ))}
+                              {a.quantity > 0 && (a.deliveringRoutes.length ? a.deliveringRoutes : a.routes).filter(r => feesIssue(r)).map(r => (
+                                <p key={`f-${r.id}`} className="text-red-600">⚠ Route {r.id} fees: {feesIssue(r)}</p>
                               ))}
                               {a.quantity > 0 && (a.deliveringRoutes.length ? a.deliveringRoutes : a.routes).filter(r => transitIssue(r)).map(r => (
                                 <p key={`t-${r.id}`} className="text-red-600">⚠ Route {r.id} transit: {transitIssue(r)}</p>

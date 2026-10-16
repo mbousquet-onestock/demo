@@ -4,7 +4,7 @@ import { fetchSalesChannels, SalesChannelInfo } from '../services/salesChannelSe
 import { settingsStore } from '../services/appStores';
 import { savePayload, getLastProject } from '../services/payloadStore';
 import StockViewCheck from './StockViewCheck';
-import { DeliveryConfig, EndpointAnalysis, carrierLabel, routeTimetableIssues, transitIssue, executionTimeIssue, endpointExecutionTimes, RouteEndpoint } from '../services/deliveryRouteService';
+import { DeliveryConfig, EndpointAnalysis, carrierLabel, routeTimetableIssues, transitIssue, feesIssue, executionTimeIssue, endpointExecutionTimes, RouteEndpoint } from '../services/deliveryRouteService';
 
 interface Props {
   config: DeliveryConfig;
@@ -219,6 +219,9 @@ const DeliveryPromisePanel: React.FC<Props> = ({ config, itemId, country, zip, a
                   {o.reason && <span className="font-mono text-red-700">{o.reason}</span>}
                   {o.destination?.delivery_zone && <span className="text-gray-500">destination zone <strong>{o.destination.delivery_zone}</strong></span>}
                 </div>
+                {o.status && o.status !== 'none' && (o.cost === null || o.cost === undefined) && (
+                  <p className="text-red-600 font-bold">⚠ Delivery fees null: the option has no cost (check the metric_values of its routes).</p>
+                )}
                 {o.status && o.status !== 'none' && (
                   <p className="text-gray-700">ETA {fmt(o.eta_start)} → {fmt(o.eta_end)} · {o.shipment_number ?? '?'} shipment(s){o.cost !== undefined ? ` · cost ${o.cost}` : ''}{o.cutoff ? ` · cutoff ${fmt(o.cutoff)}` : ''}</p>
                 )}
@@ -301,7 +304,7 @@ const DeliveryPromisePanel: React.FC<Props> = ({ config, itemId, country, zip, a
                     )}
                     {['beyond_time_limit', 'no_eligible_route', 'missing_destination_timetable'].includes(o.reason) && (() => {
                       const routes = [...new Map(withStock.flatMap(a => (a.deliveringRoutes.length ? a.deliveringRoutes : a.routes)).map(r => [r.id, r])).values()];
-                      const issues = routes.map(r => ({ r, issue: [transitIssue(r) && `transit: ${transitIssue(r)}`, routeTimetableIssues(r, config.timetables)].filter(Boolean).join(' ; ') })).filter(x => x.issue);
+                      const issues = routes.map(r => ({ r, issue: [transitIssue(r) && `transit: ${transitIssue(r)}`, feesIssue(r) && `fees: ${feesIssue(r)}`, routeTimetableIssues(r, config.timetables)].filter(Boolean).join(' ; ') })).filter(x => x.issue);
                       return issues.length
                         ? <p className="text-amber-800">Routes transit / timetables: {issues.map(x => `${x.r.id} (${carrierLabel(x.r)}) — ${x.issue}`).join(' ; ')}.</p>
                         : routes.length ? <p className="text-gray-700">The transit times and timetables of the {routes.length} route(s) from the stock are set.</p> : null;

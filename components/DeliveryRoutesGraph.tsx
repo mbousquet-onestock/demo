@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { DeliveryRoute, Zone, carrierLabel, transitLabel, transitIssue } from '../services/deliveryRouteService';
+import { DeliveryRoute, Zone, carrierLabel, transitLabel, transitIssue, feesIssue, feesLabel } from '../services/deliveryRouteService';
 
 interface Props {
   routes: DeliveryRoute[];
@@ -72,7 +72,7 @@ const DeliveryRoutesGraph: React.FC<Props> = ({ routes, zones, endpointCounts, s
                 onMouseLeave={() => setHover(null)}
                 onClick={() => onSelect?.(selectedId === r.id ? null : r.id)}
               >
-                <title>{`${r.id}\n${zoneName(o)} → ${zoneName(d)}\n${carrierLabel(r)} · transit ${transitLabel(r) || 'not set'}${transitIssue(r) ? `\n⚠ ${transitIssue(r)}` : ''}`}</title>
+                <title>{`${r.id}\n${zoneName(o)} → ${zoneName(d)}\n${carrierLabel(r)} · transit ${transitLabel(r) || 'not set'}${transitIssue(r) ? `\n⚠ ${transitIssue(r)}` : ''}\nfees ${feesLabel(r) || 'not set'}${feesIssue(r) ? `\n⚠ ${feesIssue(r)}` : ''}`}</title>
               </path>
             );
           })}

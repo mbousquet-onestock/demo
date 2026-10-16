@@ -36,6 +36,9 @@ export interface DeliveryRoute {
     parcel_info?: Record<string, string>;
   };
   information?: Record<string, unknown>;
+  carrier_information?: Record<string, unknown>;
+  // Custom costs of the route (delivery fees…): { cost: 4.9, … }.
+  metric_values?: Record<string, number | null>;
 }
 
 export interface RouteEndpoint {
@@ -493,4 +496,24 @@ export const endpointExecutionTimes = (ep: RouteEndpoint, all: ExecutionTime[] |
   const refs = (ep as any).execution_times;
   if (!Array.isArray(refs) || !all) return [];
   return refs.map((r: any) => all.find(e => e.id === (r?.id ?? r)) || { id: String(r?.id ?? r), operation: r?.operation }) as ExecutionTime[];
+};
+
+// ---- Route delivery fees (metric_values: custom costs of the route)
+const FEE_KEY = /cost|fee|price|frais|shipping|tarif/i;
+export const routeFees = (r: DeliveryRoute): { entries: [string, number | null][]; fee: number | null | undefined; key?: string } => {
+  const entries = Object.entries(r.metric_values || {}) as [string, number | null][];
+  const hit = entries.find(([k]) => FEE_KEY.test(k)) || entries[0];
+  return { entries, fee: hit ? hit[1] : undefined, key: hit?.[0] };
+};
+export const feesIssue = (r: DeliveryRoute): string => {
+  const { entries, fee, key } = routeFees(r);
+  if (entries.length === 0) return 'no delivery fees (metric_values not set)';
+  const nulls = entries.filter(([, v]) => v === null || v === undefined).map(([k]) => k);
+  if (fee === null || fee === undefined) return `delivery fees null (${key})`;
+  if (nulls.length) return `null value(s): ${nulls.join(', ')}`;
+  return '';
+};
+export const feesLabel = (r: DeliveryRoute) => {
+  const { entries } = routeFees(r);
+  return entries.length ? entries.map(([k, v]) => `${k} ${v ?? 'null'}`).join(' · ') : '';
 };
