@@ -392,11 +392,12 @@ export const fetchTimetables = async (ids: string[]): Promise<Record<string, Tim
       });
     } catch { /* per id below */ }
   }
-  for (const id of ids.filter(x => !out[x])) {
+  // Lists may return the timetables without their hours: read those ones in detail.
+  for (const id of ids.filter(x => !out[x] || rawSpans(out[x]).length === 0)) {
     try {
       const body: any = await get(`/timetables/${encodeURIComponent(id)}`, {});
-      const t = body?.timetable || body;
-      if (t && typeof t === 'object') out[id] = { id, ...t };
+      const t = body?.timetable || (Array.isArray(body?.timetables) ? body.timetables.find((x: any) => String(x?.id) === id) : null) || body;
+      if (t && typeof t === 'object' && (!out[id] || rawSpans(t).length > 0)) out[id] = { id, ...t };
     } catch { /* reported as not found */ }
   }
   return out;
@@ -416,19 +417,78 @@ export interface TimetableReport {
   summary: string;
 }
 
+
+// ---- Timetable formats: spans in hours.timespans (spec) or elsewhere; seconds / minutes from Monday 00:00,
+// dates (seconds or ms), or "HH:MM" with a day.
+const SPAN_KEYS = ['start', 'end', 'from', 'to', 'open', 'close', 'opening', 'closing', 'start_time', 'end_time'];
+export const rawSpans = (t: any): any[] => {
+  if (!t || typeof t !== 'object') return [];
+  const direct = [t.hours?.timespans, t.timespans, Array.isArray(t.hours) ? t.hours : null, t.hours?.timespan, t.timetable?.hours?.timespans, t.opening_hours?.timespans]
+    .find(a => Array.isArray(a) && a.length);
+  if (direct) return direct as any[];
+  // Any array of objects carrying a start / end.
+  let found: any[] = [];
+  const walk = (n: any, depth: number) => {
+    if (found.length || !n || typeof n !== 'object' || depth > 6) return;
+    if (Array.isArray(n)) {
+      if (n.length && n.every(x => x && typeof x === 'object' && SPAN_KEYS.some(k => k in x))) { found = n; return; }
+      n.forEach(x => walk(x, depth + 1));
+      return;
+    }
+    Object.values(n).forEach(v => walk(v, depth + 1));
+  };
+  walk(t, 0);
+  return found;
+};
+
+const DAY_INDEX: Record<string, number> = {
+  monday: 0, mon: 0, lundi: 0, tuesday: 1, tue: 1, mardi: 1, wednesday: 2, wed: 2, mercredi: 2, thursday: 3, thu: 3, jeudi: 3,
+  friday: 4, fri: 4, vendredi: 4, saturday: 5, sat: 5, samedi: 5, sunday: 6, sun: 6, dimanche: 6,
+};
+const clockSeconds = (v: string) => {
+  const m = v.match(/^(\d{1,2})[:h](\d{2})(?::(\d{2}))?$/);
+  return m ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3] || 0) : NaN;
+};
+
+export const normalizedSpans = (t: any): { start: number; end: number; date: boolean; options?: Record<string, boolean> }[] => {
+  const raw = rawSpans(t).map(sp => ({
+    s: sp.start ?? sp.from ?? sp.open ?? sp.opening ?? sp.start_time,
+    e: sp.end ?? sp.to ?? sp.close ?? sp.closing ?? sp.end_time,
+    day: sp.day ?? sp.weekday ?? sp.day_of_week,
+    options: sp.options,
+  }));
+  // Week offsets: minutes when every offset fits in a week of minutes, else seconds.
+  const offsets = raw.flatMap(r => [r.s, r.e]).filter(v => typeof v === 'number' && v < 1e9) as number[];
+  const inMinutes = offsets.length > 0 && Math.max(...offsets) <= 7 * 1440;
+  return raw.map(r => {
+    if (typeof r.s === 'string' && typeof r.e === 'string') {
+      // ISO dates, or "09:00" with a day.
+      if (/^\d{4}-\d{2}-\d{2}/.test(r.s)) return { start: Date.parse(r.s) / 1000, end: Date.parse(r.e) / 1000, date: true, options: r.options };
+      const day = typeof r.day === 'number' ? (r.day + 6) % 7 : DAY_INDEX[String(r.day || '').toLowerCase()];
+      const base = (day ?? 0) * 86400;
+      return { start: base + clockSeconds(r.s), end: base + clockSeconds(r.e), date: false, options: r.options };
+    }
+    let s = Number(r.s), e = Number(r.e);
+    if (s > 1e12) return { start: s / 1000, end: e / 1000, date: true, options: r.options };
+    if (s > 1e9 || s >= WEEK * 2) return { start: s, end: e, date: true, options: r.options };
+    if (inMinutes) { s *= 60; e *= 60; }
+    return { start: s, end: e, date: false, options: r.options };
+  });
+};
+
 // Weekly spans are seconds from Monday 00:00 (values above one week are read as dates).
 export const timetableReport = (id: string | undefined, timetables: Record<string, Timetable> | undefined): TimetableReport => {
   const days: { start: number; end: number }[][] = DAYS.map(() => []);
   if (!id) return { status: 'not-set', days, hoursPerWeek: 0, exceptions: [], summary: 'not set on the route' };
   const t = timetables?.[id];
   if (!t) return { status: 'not-found', days, hoursPerWeek: 0, exceptions: [], summary: `timetable ${id} not found` };
-  const spans = Array.isArray(t.hours?.timespans) ? t.hours!.timespans! : [];
+  const spans = normalizedSpans(t);
   const exceptions: string[] = [];
   let seconds = 0;
   spans.forEach(sp => {
-    const start = Number(sp.start), end = Number(sp.end);
+    const { start, end } = sp;
     if (!isFinite(start) || !isFinite(end) || end <= start) return;
-    if (start >= WEEK * 2) {
+    if (sp.date) {
       const closed = sp.options && Object.entries(sp.options).filter(([, v]) => v).map(([k]) => k).join(', ');
       exceptions.push(`${new Date(start * 1000).toLocaleString()} → ${new Date(end * 1000).toLocaleString()}${closed ? ` (${closed})` : ''}`);
       return;
@@ -447,7 +507,7 @@ export const timetableReport = (id: string | undefined, timetables: Record<strin
   const openDays = days.filter(d => d.length).length;
   const status: TimetableReport['status'] = hoursPerWeek === 0 ? 'empty' : openDays < 5 ? 'partial' : 'ok';
   const summary = hoursPerWeek === 0
-    ? `${t.name || id}: no weekly time span${exceptions.length ? ` (${exceptions.length} dated span(s) only)` : ''}`
+    ? `${t.name || id}: no weekly time span${exceptions.length ? ` (${exceptions.length} dated span(s) only)` : ''}${rawSpans(t).length === 0 ? ` — no time span found in the timetable (fields: ${Object.keys(t).join(', ')})` : ''}`
     : `${t.name || id}: ${hoursPerWeek} h / week, ${openDays} day(s) · ${days.map((d, i) => (d.length ? `${DAYS[i]} ${d.map(x => `${hhmm(x.start)}-${hhmm(x.end)}`).join(',')}` : '')).filter(Boolean).join(' · ')}`;
   return { status, days, hoursPerWeek, exceptions, summary };
 };
