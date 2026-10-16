@@ -106,6 +106,22 @@ export interface Endpoint {
   };
 }
 
+// OneStock site usable by the app (API Settings), chosen in the top bar.
+export interface SiteProfile {
+  id: string;
+  label: string;
+  siteId: string;
+  // Token of this site (stored encrypted in the database).
+  token: string;
+}
+
+// OneStock API URL usable by the app; "{site_id}" is replaced by the selected site.
+export interface ApiUrlProfile {
+  id: string;
+  label: string;
+  url: string;
+}
+
 export interface AppSettings {
   apiName: string;
   // Base URL of the OneStock API, e.g. https://c500.api.qualif.onestock-retail.com
@@ -114,6 +130,11 @@ export interface AppSettings {
   siteId: string;
   // Token used by every call (stored encrypted in the database).
   token: string;
+  // Sites / URLs defined in API Settings; apiUrl, siteId and token hold the selected ones.
+  sites?: SiteProfile[];
+  apiUrls?: ApiUrlProfile[];
+  activeSiteId?: string;
+  activeUrlId?: string;
   // OpenAI key for AI generation (optional when OPENAI_API_KEY is set on the server; stored encrypted).
   openaiApiKey?: string;
   openaiModel?: string;

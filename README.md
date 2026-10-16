@@ -34,9 +34,10 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
   sub-orders); an emptied set / batch is deleted. Nothing is deleted in OneStock. Sub-folders: a project named `Client/Phase 1`
   is the sub-folder `Phase 1` of `Client`; selecting a folder replays it with its sub-folders (optional). Calls can be
   moved to another (new) sub-folder, and a folder can be renamed / moved with all its sub-folders.
-- **API Settings**: API URL (qualif / prod shortcuts), version, site ID and token (paste the token returned by
-  `POST /login`). Every call uses them; payloads keep `{{site_id}}` / `{{token}}` variables, resolved at call time.
-  "Test token" calls `GET /sales_channels`.
+- **API Settings**: the sites (label, site ID and token returned by `POST /login`) and the API URLs (label, URL where
+  `{site_id}` is replaced by the selected site; Qualif / Production by default), plus the API version. The site and
+  the URL used by every call are chosen in the **top bar** dropdowns (QUALIF / PROD badge). Payloads keep
+  `{{site_id}}` / `{{token}}` variables, resolved at call time. "Test token" calls `GET /sales_channels`.
 - **Stock Points**: describe a network (context) and a count; OpenAI generates OneStock stock locations through
   `api/ai.ts` (batches of 25). Review them in a table and on a map, edit them, save the set under a project (synced
   to the database) and create them with `POST /endpoints` (one call per point, or bulk), with the result per point.

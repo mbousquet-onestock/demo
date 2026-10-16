@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { AppSettings, OnestockApiVersion } from '../types';
+import { AppSettings, OnestockApiVersion, SiteProfile, ApiUrlProfile } from '../types';
 import {
   getApiTarget, missingTargetFields, buildUrl, onestockRequest, describeCallError,
-  QUALIF_URL_TEMPLATE, PROD_URL_TEMPLATE, hasRealValue,
 } from '../services/onestockClient';
+import { activeProfiles, selectSite, selectUrl, resolveUrl, newProfileId, DEFAULT_API_URLS } from '../services/apiProfiles';
 
 interface ApiTargetSettingsProps {
   settings: AppSettings;
@@ -12,11 +12,11 @@ interface ApiTargetSettingsProps {
 
 const labelClass = 'block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5';
 const inputClass = 'w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:border-onestock-blue';
+const cellInput = 'w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:border-onestock-blue';
 
 // The single place where the OneStock target of every API call is set: URL, version, site and token.
 const ApiTargetSettings: React.FC<ApiTargetSettingsProps> = ({ settings, onSave }) => {
-  const [showToken, setShowToken] = useState(false);
-  const [testing, setTesting] = useState(false);
+    const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null);
 
   const target = getApiTarget(settings);
@@ -25,11 +25,25 @@ const ApiTargetSettings: React.FC<ApiTargetSettingsProps> = ({ settings, onSave 
     setTestResult(null);
     onSave({ ...settings, ...patch });
   };
-  // Placeholders such as {{site_id}} from older versions are shown as empty fields.
-  const display = (value: string) => (hasRealValue(value) ? value : '');
+  const { sites, urls, site: activeSite, url: activeUrl } = activeProfiles(settings);
+  const [shown, setShown] = useState<Set<string>>(new Set());
 
-  const fillUrl = (template: string) =>
-    set({ apiUrl: template.replace('{site_id}', hasRealValue(settings.siteId) ? settings.siteId.trim() : '{site_id}') });
+  // Editing the selected site / URL also updates the values used by the calls.
+  const saveSites = (next: SiteProfile[]) => {
+    const patch: Partial<AppSettings> = { sites: next, apiUrls: urls };
+    const active = activeSite && next.find(x => x.id === activeSite.id);
+    if (active) Object.assign(patch, { siteId: active.siteId, token: active.token, ...(activeUrl ? { apiUrl: resolveUrl(activeUrl.url, active.siteId) } : {}) });
+    set(patch);
+  };
+  const saveUrls = (next: ApiUrlProfile[]) => {
+    const patch: Partial<AppSettings> = { sites, apiUrls: next };
+    const active = activeUrl && next.find(x => x.id === activeUrl.id);
+    if (active) patch.apiUrl = resolveUrl(active.url, settings.siteId);
+    set(patch);
+  };
+  const editSite = (id: string, field: keyof SiteProfile, value: string) => saveSites(sites.map(x => (x.id === id ? { ...x, [field]: value.trim() === value ? value : value.trim() } : x)));
+  const editUrl = (id: string, field: keyof ApiUrlProfile, value: string) => saveUrls(urls.map(x => (x.id === id ? { ...x, [field]: value } : x)));
+  const missingDefaults = DEFAULT_API_URLS.filter(d => !urls.some(u => u.url === d.url));
 
   const testToken = async () => {
     setTesting(true);
@@ -61,55 +75,90 @@ const ApiTargetSettings: React.FC<ApiTargetSettingsProps> = ({ settings, onSave 
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="md:col-span-3">
-          <div className="flex items-center justify-between mb-1.5">
-            <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">API URL</label>
-            <div className="flex gap-2">
-              <button onClick={() => fillUrl(QUALIF_URL_TEMPLATE)} className="text-[10px] font-bold text-onestock-blue hover:underline">Qualif URL</button>
-              <button onClick={() => fillUrl(PROD_URL_TEMPLATE)} className="text-[10px] font-bold text-onestock-blue hover:underline">Prod URL</button>
-            </div>
-          </div>
-          <input
-            value={settings.apiUrl}
-            onChange={e => set({ apiUrl: e.target.value })}
-            placeholder="https://c500.api.qualif.onestock-retail.com"
-            className={inputClass + ' font-mono'}
-          />
+      {/* Sites */}
+      <section className="space-y-3 mb-8">
+        <div className="flex items-center justify-between">
+          <h3 className={labelClass + ' mb-0'}>Sites (selected in the top bar)</h3>
+          <button onClick={() => saveSites([...sites, { id: newProfileId(), label: '', siteId: '', token: '' }])} className="text-xs font-bold text-onestock-blue hover:underline">+ Add a site</button>
         </div>
+        {sites.length === 0 && <p className="text-xs text-gray-400">No site yet: add one with its label, site ID and token.</p>}
+        {sites.map(x => {
+          const isActive = activeSite?.id === x.id;
+          return (
+            <div key={x.id} className={`grid grid-cols-1 md:grid-cols-[1.2fr_0.8fr_2fr_auto] gap-2 items-center p-3 rounded-xl border ${isActive ? 'border-[#002D72] bg-blue-50/40' : 'border-gray-200'}`}>
+              <input value={x.label} onChange={e => editSite(x.id, 'label', e.target.value)} placeholder="Label (e.g. Client X qualif)" className={cellInput} />
+              <input value={x.siteId} onChange={e => editSite(x.id, 'siteId', e.target.value.trim())} placeholder="Site ID (c500)" className={cellInput + ' font-mono'} />
+              <div className="flex gap-1">
+                <input
+                  type={shown.has(x.id) ? 'text' : 'password'}
+                  value={x.token}
+                  onChange={e => editSite(x.id, 'token', e.target.value.trim())}
+                  placeholder="Token (POST /login)"
+                  autoComplete="off"
+                  className={cellInput + ' font-mono'}
+                />
+                <button onClick={() => setShown(prev => { const n = new Set(prev); n.has(x.id) ? n.delete(x.id) : n.add(x.id); return n; })} className="px-2 text-[10px] font-bold text-onestock-blue">{shown.has(x.id) ? 'Hide' : 'Show'}</button>
+              </div>
+              <div className="flex items-center gap-2 justify-end">
+                {isActive
+                  ? <span className="text-[10px] font-bold text-[#002D72] bg-blue-100 px-2 py-1 rounded">SELECTED</span>
+                  : <button onClick={() => set(selectSite({ ...settings, sites, apiUrls: urls }, x.id))} disabled={!x.siteId} className="px-2 py-1 text-[11px] font-bold text-onestock-blue border border-onestock-blue/40 rounded hover:bg-blue-50 disabled:opacity-40">Use</button>}
+                <button
+                  onClick={() => window.confirm(`Delete the site "${x.label || x.siteId}"?`) && saveSites(sites.filter(y => y.id !== x.id))}
+                  className="px-1.5 text-gray-400 hover:text-red-600"
+                  title="Delete"
+                >✕</button>
+              </div>
+            </div>
+          );
+        })}
+      </section>
+
+      {/* URLs */}
+      <section className="space-y-3 mb-8">
+        <div className="flex items-center justify-between">
+          <h3 className={labelClass + ' mb-0'}>API URLs — <span className="normal-case font-mono">{'{site_id}'}</span> is replaced by the selected site</h3>
+          <div className="flex gap-3">
+            {missingDefaults.map(d => (
+              <button key={d.id} onClick={() => saveUrls([...urls, { ...d, id: newProfileId() }])} className="text-xs font-bold text-gray-500 hover:underline">+ {d.label}</button>
+            ))}
+            <button onClick={() => saveUrls([...urls, { id: newProfileId(), label: '', url: 'https://' }])} className="text-xs font-bold text-onestock-blue hover:underline">+ Add a URL</button>
+          </div>
+        </div>
+        {urls.map(x => {
+          const isActive = activeUrl?.id === x.id;
+          return (
+            <div key={x.id} className={`grid grid-cols-1 md:grid-cols-[1fr_3fr_auto] gap-2 items-center p-3 rounded-xl border ${isActive ? 'border-[#002D72] bg-blue-50/40' : 'border-gray-200'}`}>
+              <input value={x.label} onChange={e => editUrl(x.id, 'label', e.target.value)} placeholder="Label (e.g. Qualif)" className={cellInput} />
+              <div>
+                <input value={x.url} onChange={e => editUrl(x.id, 'url', e.target.value.trim())} placeholder="https://{site_id}.api.qualif.onestock-retail.com" className={cellInput + ' font-mono'} />
+                {x.url.includes('{site_id}') && settings.siteId && <p className="text-[10px] text-gray-400 font-mono mt-1">→ {resolveUrl(x.url, settings.siteId)}</p>}
+              </div>
+              <div className="flex items-center gap-2 justify-end">
+                {isActive
+                  ? <span className="text-[10px] font-bold text-[#002D72] bg-blue-100 px-2 py-1 rounded">SELECTED</span>
+                  : <button onClick={() => set(selectUrl({ ...settings, sites, apiUrls: urls }, x.id))} disabled={!/^https?:\/\/./.test(x.url)} className="px-2 py-1 text-[11px] font-bold text-onestock-blue border border-onestock-blue/40 rounded hover:bg-blue-50 disabled:opacity-40">Use</button>}
+                <button
+                  onClick={() => window.confirm(`Delete the URL "${x.label || x.url}"?`) && saveUrls(urls.filter(y => y.id !== x.id))}
+                  className="px-1.5 text-gray-400 hover:text-red-600"
+                  title="Delete"
+                >✕</button>
+              </div>
+            </div>
+          );
+        })}
+      </section>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div>
           <label className={labelClass}>API version</label>
           <select value={settings.apiVersion || 'v3'} onChange={e => set({ apiVersion: e.target.value as OnestockApiVersion })} className={inputClass}>
             {(['v1', 'v2', 'v3', 'v4'] as OnestockApiVersion[]).map(v => <option key={v} value={v}>{v}</option>)}
           </select>
         </div>
-
-        <div>
-          <label className={labelClass}>Site ID</label>
-          <input value={display(settings.siteId)} onChange={e => set({ siteId: e.target.value.trim() })} placeholder="c500" className={inputClass} />
-        </div>
         <div className="md:col-span-3">
-          <div className="flex items-center justify-between mb-1.5">
-            <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">Token</label>
-            <button onClick={() => setShowToken(v => !v)} className="text-[10px] font-bold text-onestock-blue hover:underline">{showToken ? 'Hide' : 'Show'}</button>
-          </div>
-          <input
-            type={showToken ? 'text' : 'password'}
-            value={display(settings.token)}
-            onChange={e => set({ token: e.target.value.trim() })}
-            placeholder="Paste the token returned by POST /login"
-            autoComplete="off"
-            className={inputClass + ' font-mono'}
-          />
-        </div>
-
-        <div className="md:col-span-2">
           <label className={labelClass}>Import sales channel</label>
           <input value={settings.salesChannel} onChange={e => set({ salesChannel: e.target.value })} className={inputClass} />
-        </div>
-        <div className="md:col-span-2">
-          <label className={labelClass}>Label</label>
-          <input value={settings.apiName} onChange={e => set({ apiName: e.target.value })} className={inputClass} />
         </div>
       </div>
 
@@ -127,8 +176,8 @@ const ApiTargetSettings: React.FC<ApiTargetSettingsProps> = ({ settings, onSave 
         )}
       </div>
       <p className="text-[11px] text-gray-400 mt-4">
-        The token is stored encrypted in the database (when the database is configured) and kept in this browser.
-        When it expires, paste a new one here.
+        Tokens are stored encrypted in the database (when the database is configured) and kept in this browser.
+        "Test token" checks the selected site; when a token expires, paste the new one in its site.
       </p>
     </div>
   );
