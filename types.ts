@@ -301,6 +301,8 @@ export interface CapturedProduct {
   // Page the product was read on.
   page: string;
   price: string;
+  // Strikethrough / list price (compare_at_price).
+  comparePrice?: string;
   currency: string;
   availability: string;
   color: string;
@@ -309,7 +311,7 @@ export interface CapturedProduct {
   characteristics: { name: string; value: string }[];
   variants: {
     sku: string; gtin: string; name: string; color: string; size: string;
-    price: string; currency: string; image: string; url: string; availability: string;
+    price: string; comparePrice?: string; currency: string; image: string; url: string; availability: string;
   }[];
   // json-ld | microdata | opengraph | html
   source: string;

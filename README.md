@@ -63,6 +63,9 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
   data (schema.org JSON-LD / microdata, OpenGraph) plus specification tables, gallery images and description; the page
   source can also be pasted. Captures (images as URLs, description, characteristics, variants with EAN / price) are
   saved per project in the database (`product_captures`) and become Product Manager articles (one per variant).
+  Prices: price and strikethrough price (compare_at_price) per product and variant, from the schema.org offers
+  (priceSpecification), the product JSON / Shopify API (compare_at_price) or the prices shown in the page; amounts are
+  normalised ("1 299,90 €" → 1299.90 EUR) and fill the article price / compare-at price.
   Images: at most 4 per article, all related to the main image (gallery block holding the main image, same reference
   in the file name or same folder; size duplicates merged); a variant with its own image gets the images related to it.
   Variants are read from the schema.org data (hasVariant, one offer per SKU, Product objects of the same group), from the

@@ -160,7 +160,7 @@ const ProductCaptureDrawer: React.FC<Props> = ({ defaultCurrency, onAdd, onClose
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-bold text-gray-900 truncate">{p.name || p.sku}</p>
                         <p className="text-[11px] text-gray-500 truncate">
-                          {[p.brand, p.sku && `SKU ${p.sku}`, p.gtin && `EAN ${p.gtin}`, p.price && `${p.price} ${p.currency}`].filter(Boolean).join(' · ')}
+                          {[p.brand, p.sku && `SKU ${p.sku}`, p.gtin && `EAN ${p.gtin}`, p.price && `${p.price} ${p.currency}${p.comparePrice ? ` (was ${p.comparePrice})` : ''}`].filter(Boolean).join(' · ')}
                         </p>
                         <p className="text-[10px] text-gray-400">
                           {p.images.length} image(s) · {p.characteristics.length} characteristic(s) · {p.variants.length} variant(s){p.variantSource ? ` (${p.variantSource})` : ''} · {p.source}
@@ -192,7 +192,7 @@ const ProductCaptureDrawer: React.FC<Props> = ({ defaultCurrency, onAdd, onClose
                             <thead><tr className="text-left text-gray-400"><th>SKU</th><th>EAN</th><th>Color</th><th>Size</th><th>Price</th><th>Stock</th></tr></thead>
                             <tbody>
                               {p.variants.map((v, j) => (
-                                <tr key={j} className="border-b border-gray-50 font-mono"><td>{v.sku}</td><td>{v.gtin}</td><td>{v.color}</td><td>{v.size}</td><td>{v.price} {v.currency}</td><td>{v.availability}</td></tr>
+                                <tr key={j} className="border-b border-gray-50 font-mono"><td>{v.sku}</td><td>{v.gtin}</td><td>{v.color}</td><td>{v.size}</td><td>{v.price} {v.currency}{v.comparePrice ? <span className="text-gray-400 line-through ml-1">{v.comparePrice}</span> : null}</td><td>{v.availability}</td></tr>
                               ))}
                             </tbody>
                           </table>

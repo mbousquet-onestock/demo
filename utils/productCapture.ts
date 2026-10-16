@@ -27,6 +27,25 @@ export function captureRuntime(opts: { app?: string; doc?: Document; url?: strin
   const SIZE_NAME = /size|taille|pointure|longueur|length|width|largeur|tour/i;
   const COLOR_NAME = /colou?r|couleur|coloris|teinte|shade/i;
   const SIZE_VALUE = /^(XXXS|XXS|XS|S|M|L|XL|XXL|XXXL|[2-6]XL|TU|One ?size|Taille unique|\d{1,3}([.,]5)?|\d+\/\d+|T\d+|\d+ ?(ans|mois|cm|ml|g|kg))$/i;
+  // "1 299,90 €" / "€1,299.90" / 129 → "1299.90" (empty when no amount).
+  const normPrice = (v: any): string => {
+    if (v === null || v === undefined || v === '') return '';
+    if (typeof v === 'number') return isFinite(v) ? v.toFixed(2) : '';
+    const m = String(v).replace(/[\s\u00a0\u202f']/g, '').match(/\d[\d.,]*/);
+    if (!m) return '';
+    let n = m[0].replace(/[.,]$/, '');
+    const lastSep = Math.max(n.lastIndexOf(','), n.lastIndexOf('.'));
+    if (lastSep >= 0 && n.length - lastSep - 1 <= 2) n = `${n.slice(0, lastSep).replace(/[.,]/g, '')}.${n.slice(lastSep + 1)}`;
+    else n = n.replace(/[.,]/g, '');
+    const f = parseFloat(n);
+    return isFinite(f) ? f.toFixed(2) : '';
+  };
+  const currencyOf = (text: string): string => {
+    const t = String(text || '');
+    const code = t.match(/\b(EUR|USD|GBP|CHF|CAD|AUD|JPY|SEK|NOK|DKK|PLN|CZK)\b/i);
+    if (code) return code[1].toUpperCase();
+    return /€/.test(t) ? 'EUR' : /£/.test(t) ? 'GBP' : /¥/.test(t) ? 'JPY' : /\$/.test(t) ? 'USD' : '';
+  };
   // Variant objects of a product JSON (Shopify product JSON, theme / Magento / custom JSON).
   const mapVariants = (items: any[], optionNames: string[], base: string, cents: boolean): any[] => items.map((v: any) => {
     const values: string[] = Array.isArray(v.options) && v.options.every((x: any) => typeof x !== 'object')
@@ -42,6 +61,8 @@ export function captureRuntime(opts: { app?: string; doc?: Document; url?: strin
     });
     let price: any = v.price ?? (v.offers && v.offers.price);
     if (typeof price === 'number' && cents && Number.isInteger(price)) price = (price / 100).toFixed(2);
+    let compare: any = v.compare_at_price ?? v.compareAtPrice ?? v.regular_price ?? v.old_price ?? v.list_price ?? v.oldPrice;
+    if (typeof compare === 'number' && cents && Number.isInteger(compare)) compare = (compare / 100).toFixed(2);
     const img = v.featured_image ? (v.featured_image.src || v.featured_image) : v.image ? (v.image.src || v.image) : '';
     return {
       sku: clean(v.sku, 120),
@@ -49,6 +70,7 @@ export function captureRuntime(opts: { app?: string; doc?: Document; url?: strin
       name: clean(v.name || v.public_title || v.title, 300),
       color, size,
       price: clean(price, 40),
+      comparePrice: clean(compare, 40),
       currency: clean(v.currency || v.priceCurrency, 10),
       image: typeof img === 'string' ? abs(img, base) : '',
       url: v.url ? abs(v.url, base) : v.id && cents ? abs(`?variant=${v.id}`, base) : '',
@@ -69,7 +91,20 @@ export function captureRuntime(opts: { app?: string; doc?: Document; url?: strin
     // ---- JSON-LD
     const fromJsonLd = (o: any): any => {
       const offers = list(o.offers).flatMap((x: any) => [x, ...list(x && x.offers)]).filter(Boolean);
-      const offer = offers.find((x: any) => x.price !== undefined || x.lowPrice !== undefined) || offers[0] || {};
+      const offer = offers.find((x: any) => x.price !== undefined || x.lowPrice !== undefined || x.priceSpecification) || offers[0] || {};
+      // Price of an offer; the strikethrough / list price of its price specifications is the compare-at price.
+      const offerPrices = (x: any) => {
+        const specs = list(x && x.priceSpecification).filter(Boolean);
+        const isList = (sp: any) => /Strikethrough|ListPrice|MSRP|SRP|Original/i.test(clean(sp.priceType));
+        const sale = specs.find((sp: any) => !isList(sp) && sp.price !== undefined);
+        const strike = specs.find((sp: any) => isList(sp) && sp.price !== undefined);
+        return {
+          price: clean((x && (x.price ?? x.lowPrice)) ?? (sale && sale.price), 40),
+          currency: clean((x && x.priceCurrency) || (sale && sale.priceCurrency) || (strike && strike.priceCurrency), 10),
+          comparePrice: clean(strike && strike.price, 40),
+        };
+      };
+      const op = offerPrices(offer);
       const characteristics: { name: string; value: string }[] = [];
       list(o.additionalProperty).forEach((p: any) => {
         const name = clean(p && p.name, 80);
@@ -95,15 +130,16 @@ export function captureRuntime(opts: { app?: string; doc?: Document; url?: strin
         description: clean(o.description),
         images: images(o.image),
         url: abs(o.url || o['@id'], pageUrl),
-        price: clean(offer.price ?? offer.lowPrice, 40),
-        currency: clean(offer.priceCurrency, 10),
+        price: op.price,
+        comparePrice: op.comparePrice,
+        currency: op.currency,
         availability: clean(offer.availability, 80).split('/').pop() || '',
         color: clean(o.color, 120),
         size: clean(o.size, 120),
         category: list(o.category).map((c: any) => clean(c, 200)).filter(Boolean).join(' > '),
         characteristics,
         variants: list(o.hasVariant).filter((v: any) => v && typeof v === 'object').map(fromJsonLd)
-          .map((v: any) => ({ sku: v.sku, gtin: v.gtin, name: v.name, color: v.color, size: v.size, price: v.price, currency: v.currency, image: v.images[0] || '', url: v.url, availability: v.availability })),
+          .map((v: any) => ({ sku: v.sku, gtin: v.gtin, name: v.name, color: v.color, size: v.size, price: v.price, comparePrice: v.comparePrice, currency: v.currency, image: v.images[0] || '', url: v.url, availability: v.availability })),
         source: 'json-ld',
       };
       // One offer per variant (distinct SKUs / EANs in the offers).
@@ -114,7 +150,7 @@ export function captureRuntime(opts: { app?: string; doc?: Document; url?: strin
             const item = x.itemOffered || {};
             return {
               sku: clean(x.sku || item.sku, 120), gtin: clean(x.gtin13 || x.gtin || item.gtin13, 40), name: clean(x.name || item.name, 300),
-              color: clean(item.color, 120), size: clean(item.size, 120), price: clean(x.price, 40), currency: clean(x.priceCurrency, 10),
+              color: clean(item.color, 120), size: clean(item.size, 120), ...offerPrices(x),
               image: images(item.image)[0] || '', url: abs(x.url, pageUrl), availability: clean(x.availability, 80).split('/').pop() || '',
             };
           });
@@ -130,7 +166,7 @@ export function captureRuntime(opts: { app?: string; doc?: Document; url?: strin
       if (product.variants.length) (product as any).variantSource = 'json-ld';
       // Product group: price of its first variant.
       const v0 = product.variants.find((v: any) => v.price);
-      if (!product.price && v0) { product.price = v0.price; product.currency = product.currency || v0.currency; }
+      if (!product.price && v0) { product.price = v0.price; product.currency = product.currency || v0.currency; product.comparePrice = product.comparePrice || v0.comparePrice || ''; }
       return product;
     };
     const found: any[] = [];
@@ -163,7 +199,7 @@ export function captureRuntime(opts: { app?: string; doc?: Document; url?: strin
           sku: '',
           images: uniq(members.flatMap(m => m.images)),
           variants: head.variants.length ? head.variants : members.map(m => ({
-            sku: m.sku, gtin: m.gtin, name: m.name, color: m.color, size: m.size, price: m.price, currency: m.currency,
+            sku: m.sku, gtin: m.gtin, name: m.name, color: m.color, size: m.size, price: m.price, comparePrice: m.comparePrice, currency: m.currency,
             image: m.images[0] || '', url: m.url, availability: m.availability,
           })),
           productGroupId: id,
@@ -281,6 +317,29 @@ export function captureRuntime(opts: { app?: string; doc?: Document; url?: strin
       }
       if (!p.url) p.url = abs(meta('og:url'), pageUrl) || pageUrl;
 
+      // Prices shown in the page (sites without structured prices, or without the strikethrough price).
+      if (!p.price || !p.comparePrice) {
+        const excluded = 'header, footer, nav, [class*="recommend" i], [class*="related" i], [class*="upsell" i], [class*="cross-sell" i], [class*="carousel" i], [class*="cart" i]';
+        const OLD = /old|was|compare|strike|regular|crossed|barr|before|original|initial|list|ancien/i;
+        let current = '', old = '', symbol = '';
+        doc.querySelectorAll('[itemprop="price"], [data-price-amount], [data-product-price], [class*="price" i], [class*="prix" i], [id*="price" i], del, s').forEach(el => {
+          if (el.closest(excluded)) return;
+          const tag = el.tagName.toLowerCase();
+          const raw = el.getAttribute('content') || el.getAttribute('data-price-amount') || el.getAttribute('data-product-price') || clean(el.textContent, 80);
+          // Containers holding several amounts are read through their children.
+          if ((raw.match(/\d[\d\s.,\u00a0]*\d|\d/g) || []).length !== 1) return;
+          if ((tag === 'del' || tag === 's') && !el.closest('[class*="price" i], [class*="prix" i]')) return;
+          const value = normPrice(raw);
+          if (!value || parseFloat(value) <= 0) return;
+          const isOld = tag === 'del' || tag === 's' || !!el.closest('del, s') || OLD.test(`${el.getAttribute('class') || ''} ${el.id} ${el.parentElement ? el.parentElement.getAttribute('class') || '' : ''}`);
+          if (isOld) { if (!old) old = value; } else if (!current) current = value;
+          if (!symbol) symbol = currencyOf(el.textContent || '');
+        });
+        if (!p.price && current) p.price = current;
+        if (!p.comparePrice && old && (!p.price || parseFloat(old) > parseFloat(normPrice(p.price)))) p.comparePrice = old;
+        if (!p.currency && symbol) p.currency = symbol;
+      }
+
       // Variants published in a product JSON of the page (Shopify, Magento, themes…): the longest list wins.
       let best: any[] = [];
       const consider = (vs: any[]) => { if (vs.length > best.length) best = vs; };
@@ -359,8 +418,16 @@ export function captureRuntime(opts: { app?: string; doc?: Document; url?: strin
       }
     }
 
+    // Amounts as "1299.90"; a compare-at price is only kept above the price.
+    const prices = (x: any) => {
+      const price = normPrice(x.price);
+      const compare = normPrice(x.comparePrice);
+      return { price, comparePrice: compare && (!price || parseFloat(compare) > parseFloat(price)) ? compare : '', currency: (x.currency || currencyOf(x.price || '')).toUpperCase() };
+    };
     const products = found.filter(p => p.name || p.sku).map(p => ({
       ...p,
+      ...prices(p),
+      variants: (p.variants || []).map((v: any) => ({ ...v, ...prices(v) })),
       images: uniq(p.images).slice(0, 30),
       currency: p.currency || meta('product:price:currency'),
       page: pageUrl,
@@ -565,6 +632,7 @@ export const sanitizeCaptured = (products: unknown, page = ''): CapturedProduct[
     url: url(p.url),
     page: url(p.page) || url(page),
     price: str(p.price, 40),
+    comparePrice: str(p.comparePrice, 40),
     currency: str(p.currency, 10),
     availability: str(p.availability, 80),
     color: str(p.color, 120),
@@ -574,7 +642,7 @@ export const sanitizeCaptured = (products: unknown, page = ''): CapturedProduct[
       .map((c: any) => ({ name: str(c && c.name, 80), value: str(c && c.value, 300) })).filter((c: any) => c.name && c.value),
     variants: (Array.isArray(p.variants) ? p.variants : []).slice(0, 200).filter((v: any) => v && typeof v === 'object').map((v: any) => ({
       sku: str(v.sku, 120), gtin: str(v.gtin, 40), name: str(v.name, 300), color: str(v.color, 120), size: str(v.size, 120),
-      price: str(v.price, 40), currency: str(v.currency, 10), image: url(v.image), url: url(v.url), availability: str(v.availability, 80),
+      price: str(v.price, 40), comparePrice: str(v.comparePrice, 40), currency: str(v.currency, 10), image: url(v.image), url: url(v.url), availability: str(v.availability, 80),
     })),
     source: str(p.source, 20) || 'html',
     variantSource: str(p.variantSource, 20) || undefined,
@@ -591,7 +659,7 @@ export const capturedToProducts = (captured: CapturedProduct[], defaultCurrency 
   return captured.flatMap(c => {
     const char = (re: RegExp) => c.characteristics.find(x => re.test(x.name))?.value || '';
     const parentSku = c.productGroupId || c.sku || c.gtin || `CAPT-${stamp}-${n}`;
-    const rows = c.variants.length > 0 ? c.variants : [{ sku: c.sku, gtin: c.gtin, name: c.name, color: c.color, size: c.size, price: c.price, currency: c.currency, image: '', url: c.url, availability: c.availability }];
+    const rows = c.variants.length > 0 ? c.variants : [{ sku: c.sku, gtin: c.gtin, name: c.name, color: c.color, size: c.size, price: c.price, comparePrice: c.comparePrice, currency: c.currency, image: '', url: c.url, availability: c.availability }];
     return rows.map(v => {
       const index = n++;
       // Variants without SKU (read from the size / colour selectors): parent id + colour + size.
@@ -602,6 +670,7 @@ export const capturedToProducts = (captured: CapturedProduct[], defaultCurrency 
       const color = v.color || c.color || char(/colou?r|couleur/i);
       const size = v.size || c.size || char(/size|taille|pointure/i);
       const price = v.price || c.price;
+      const comparePrice = v.price ? v.comparePrice || '' : c.comparePrice || '';
       const features: Record<string, (string | number | boolean)[]> = {
         name: [v.name || c.name],
         long_description: [c.description],
@@ -628,6 +697,7 @@ export const capturedToProducts = (captured: CapturedProduct[], defaultCurrency 
         imageUrl: images[0] || '',
         productUrl: v.url || c.url || c.page,
         price,
+        ...(comparePrice ? { comparePrice } : {}),
         currency: v.currency || c.currency || defaultCurrency,
         color,
         size,
