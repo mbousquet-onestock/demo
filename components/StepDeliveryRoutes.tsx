@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   deliveryConfigStore, loadDeliveryConfig, matchZone, placeOfEndpoint, zoneSummary, carrierLabel, transitLabel,
-  fetchItemStock, savedImportStock, analyseDelivery, nextOpenings, TIMETABLE_KINDS, timetableReport, routeTimetableIssues, VERDICT_LABELS, EndpointAnalysis, StockLine, Verdict, RouteEndpoint,
+  fetchItemStock, savedImportStock, analyseDelivery, nextOpenings, TIMETABLE_KINDS, timetableReport, routeTimetableIssues, transitIssue, VERDICT_LABELS, EndpointAnalysis, StockLine, Verdict, RouteEndpoint,
 } from '../services/deliveryRouteService';
 import { useApiTarget, missingTargetFields } from '../services/onestockClient';
 import DeliveryRoutesGraph from './DeliveryRoutesGraph';
@@ -137,11 +137,15 @@ const StepDeliveryRoutes: React.FC = () => {
                 <div className="mt-6 overflow-x-auto">
                   <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Route timetables{config.timetables === undefined && ' (reload to read them)'}</p>
                   <table className="text-[11px]">
-                    <thead><tr className="text-left text-gray-400"><th className="pr-3">Route</th>{TIMETABLE_KINDS.map(k => <th key={k.key} className="pr-3">{k.label}</th>)}</tr></thead>
+                    <thead><tr className="text-left text-gray-400"><th className="pr-3">Route</th><th className="pr-3">Transit</th>{TIMETABLE_KINDS.map(k => <th key={k.key} className="pr-3">{k.label}</th>)}</tr></thead>
                     <tbody>
                       {config.routes.map(r => (
                         <tr key={r.id} onClick={() => setSelectedRoute(r.id)} className={`cursor-pointer border-t border-gray-50 ${selectedRoute === r.id ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
                           <td className="pr-3 py-1.5"><p className="font-bold text-gray-800">{r.id}</p><p className="text-gray-400">{carrierLabel(r)}</p></td>
+                          <td className="pr-3 py-1.5" title={transitIssue(r) || 'min – max transit hours'}>
+                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${transitIssue(r) ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'}`}>{transitLabel(r) || 'not set'}</span>
+                            {transitIssue(r) && <p className="text-[9px] text-red-600 mt-0.5 max-w-[120px]">⚠ {transitIssue(r)}</p>}
+                          </td>
                           {TIMETABLE_KINDS.map(k => {
                             const rep = timetableReport(r[k.key], config.timetables);
                             return (
@@ -163,6 +167,8 @@ const StepDeliveryRoutes: React.FC = () => {
                     <p className="text-sm font-bold text-gray-900 break-all">{route.id}</p>
                     <p><strong>{route.origin_zone_id}</strong> → <strong>{route.destination_zone_id}</strong></p>
                     <p>Carrier: <strong>{carrierLabel(route)}</strong>{transitLabel(route) && <> · transit <strong>{transitLabel(route)}</strong></>}</p>
+                    <p>Transit time: min <strong>{route.minimum_transit_hours ?? '—'} h</strong> · max <strong>{route.maximum_transit_hours ?? '—'} h</strong>
+                      {transitIssue(route) && <span className="ml-2 text-red-600 font-bold">⚠ {transitIssue(route)}</span>}</p>
                     <div className="pt-2 border-t border-gray-100 space-y-2">
                       <p className="font-bold text-gray-500">Timetables</p>
                       {TIMETABLE_KINDS.map(k => {
@@ -298,6 +304,9 @@ const StepDeliveryRoutes: React.FC = () => {
                             <td className="px-4 py-2 text-gray-600">
                               {a.explanation}
                               {a.opening && a.quantity > 0 && <p className="text-amber-700 font-bold">⚠ Opening hours: {a.opening}</p>}
+                              {a.quantity > 0 && (a.deliveringRoutes.length ? a.deliveringRoutes : a.routes).filter(r => transitIssue(r)).map(r => (
+                                <p key={`t-${r.id}`} className="text-red-600">⚠ Route {r.id} transit: {transitIssue(r)}</p>
+                              ))}
                               {a.quantity > 0 && (a.deliveringRoutes.length ? a.deliveringRoutes : a.routes).map(r => ({ r, issue: routeTimetableIssues(r, config.timetables) })).filter(x => x.issue).map(x => (
                                 <p key={x.r.id} className="text-amber-700">⚠ Route {x.r.id} timetables: {x.issue}</p>
                               ))}

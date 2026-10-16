@@ -431,3 +431,13 @@ export const routeTimetableIssues = (r: DeliveryRoute, timetables: Record<string
   TIMETABLE_KINDS.map(k => ({ k, rep: timetableReport(r[k.key], timetables) }))
     .filter(({ rep }) => rep.status === 'empty' || rep.status === 'not-found')
     .map(({ k, rep }) => `${k.label}: ${rep.summary}`).join(' ; ');
+
+// ---- Route transit time (minimum / maximum transit hours): 0 or missing is a configuration problem.
+export const transitIssue = (r: DeliveryRoute): string => {
+  const min = r.minimum_transit_hours, max = r.maximum_transit_hours;
+  if (min === undefined && max === undefined) return 'transit time not set';
+  if (!max) return `maximum transit time is ${max ?? 'not set'}`;
+  if (min !== undefined && max < min) return `maximum (${max} h) lower than minimum (${min} h)`;
+  if (min === 0) return 'minimum transit time is 0 h';
+  return '';
+};

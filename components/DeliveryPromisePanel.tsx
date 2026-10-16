@@ -3,7 +3,7 @@ import { onestockRequest, describeCallError, SITE_ID_VAR, TOKEN_VAR, useApiTarge
 import { fetchSalesChannels, SalesChannelInfo } from '../services/salesChannelService';
 import { settingsStore } from '../services/appStores';
 import { savePayload, getLastProject } from '../services/payloadStore';
-import { DeliveryConfig, EndpointAnalysis, carrierLabel, routeTimetableIssues } from '../services/deliveryRouteService';
+import { DeliveryConfig, EndpointAnalysis, carrierLabel, routeTimetableIssues, transitIssue } from '../services/deliveryRouteService';
 
 interface Props {
   config: DeliveryConfig;
@@ -285,10 +285,10 @@ const DeliveryPromisePanel: React.FC<Props> = ({ config, itemId, country, zip, a
                     )}
                     {['beyond_time_limit', 'no_eligible_route', 'missing_destination_timetable'].includes(o.reason) && (() => {
                       const routes = [...new Map(withStock.flatMap(a => (a.deliveringRoutes.length ? a.deliveringRoutes : a.routes)).map(r => [r.id, r])).values()];
-                      const issues = routes.map(r => ({ r, issue: routeTimetableIssues(r, config.timetables) })).filter(x => x.issue);
+                      const issues = routes.map(r => ({ r, issue: [transitIssue(r) && `transit: ${transitIssue(r)}`, routeTimetableIssues(r, config.timetables)].filter(Boolean).join(' ; ') })).filter(x => x.issue);
                       return issues.length
-                        ? <p className="text-amber-800">Route timetables: {issues.map(x => `${x.r.id} (${carrierLabel(x.r)}) — ${x.issue}`).join(' ; ')}.</p>
-                        : routes.length ? <p className="text-gray-700">The timetables of the {routes.length} route(s) from the stock are set and have weekly time spans.</p> : null;
+                        ? <p className="text-amber-800">Routes transit / timetables: {issues.map(x => `${x.r.id} (${carrierLabel(x.r)}) — ${x.issue}`).join(' ; ')}.</p>
+                        : routes.length ? <p className="text-gray-700">The transit times and timetables of the {routes.length} route(s) from the stock are set.</p> : null;
                     })()}
                     {['beyond_time_limit', 'no_eligible_route'].includes(o.reason) && withStock.length > 0 && !withStock.some(a => a.opening) && (
                       <p className="text-gray-700">The stock points with stock have opening hours in the next 7 days: look at the route timetables.</p>

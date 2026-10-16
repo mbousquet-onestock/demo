@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { DeliveryRoute, Zone, carrierLabel, transitLabel } from '../services/deliveryRouteService';
+import { DeliveryRoute, Zone, carrierLabel, transitLabel, transitIssue } from '../services/deliveryRouteService';
 
 interface Props {
   routes: DeliveryRoute[];
@@ -66,12 +66,13 @@ const DeliveryRoutesGraph: React.FC<Props> = ({ routes, zones, endpointCounts, s
                 stroke={color}
                 strokeWidth={isActive ? 3 : 1.6}
                 strokeOpacity={dim ? 0.12 : 0.85}
+                strokeDasharray={transitIssue(r) ? '6 4' : undefined}
                 className="cursor-pointer"
                 onMouseEnter={() => setHover(r.id)}
                 onMouseLeave={() => setHover(null)}
                 onClick={() => onSelect?.(selectedId === r.id ? null : r.id)}
               >
-                <title>{`${r.id}\n${zoneName(o)} → ${zoneName(d)}\n${carrierLabel(r)}${transitLabel(r) ? ` · ${transitLabel(r)}` : ''}`}</title>
+                <title>{`${r.id}\n${zoneName(o)} → ${zoneName(d)}\n${carrierLabel(r)} · transit ${transitLabel(r) || 'not set'}${transitIssue(r) ? `\n⚠ ${transitIssue(r)}` : ''}`}</title>
               </path>
             );
           })}

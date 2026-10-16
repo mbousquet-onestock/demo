@@ -59,6 +59,8 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
   (spans = seconds from Monday 00:00; dated spans listed apart) with a status: OK, < 5 days, empty, not found, not set.
   Empty / missing timetables of the routes from the stock are reported in the article analysis and as a cause of the
   delivery promise failures (beyond_time_limit, no_eligible_route, missing_destination_timetable).
+  Transit times (minimum / maximum transit hours) are shown per route; 0 h, not set or max < min is flagged (dashed curve
+  in the graph, warnings in the analysis and the delivery promise causes).
   **Article analysis**: for an item and a destination (country, zip), reads the stock per stock point (`GET /stocks`
   and/or the saved `PATCH /stock_import` payloads), then tells for each stock point whether it can deliver and why not
   (in no origin zone, no route from its zones, destination not covered by the routes), on a map and in a table.
