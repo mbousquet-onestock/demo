@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
-  deliveryConfigStore, loadDeliveryConfig, matchZone, placeOfEndpoint, zoneSummary, carrierLabel, transitLabel,
+  deliveryConfigStore, loadDeliveryConfig, reloadTimetables, routeTimetableIds, matchZone, placeOfEndpoint, zoneSummary, carrierLabel, transitLabel,
   fetchItemStock, savedImportStock, analyseDelivery, nextOpenings, TIMETABLE_KINDS, timetableReport, routeTimetableIssues, transitIssue, feesIssue, feesLabel, executionTimeIssue, endpointExecutionTimes, durationMinutes, VERDICT_LABELS, EndpointAnalysis, StockLine, Verdict, RouteEndpoint,
 } from '../services/deliveryRouteService';
 import { useApiTarget, missingTargetFields } from '../services/onestockClient';
@@ -24,6 +24,13 @@ const StepDeliveryRoutes: React.FC = () => {
   const [view, setView] = useState<View>('routes');
   const [selectedRoute, setSelectedRoute] = useState<string | null>(null);
   const [openZone, setOpenZone] = useState<string | null>(null);
+  const [ttLoading, setTtLoading] = useState(false);
+  const readTimetables = async () => {
+    if (!config) return;
+    setTtLoading(true);
+    setError(null);
+    try { await reloadTimetables(config); } catch (err: any) { setError(err?.message || String(err)); } finally { setTtLoading(false); }
+  };
 
   // Article analysis
   const [itemId, setItemId] = useState('');
@@ -135,7 +142,18 @@ const StepDeliveryRoutes: React.FC = () => {
               <div className={`${card} p-5 min-w-0`}>
                 <DeliveryRoutesGraph routes={config.routes} zones={config.zones} endpointCounts={endpointCounts} selectedId={selectedRoute} onSelect={setSelectedRoute} />
                 <div className="mt-6 overflow-x-auto">
-                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Route timetables{config.timetables === undefined && ' (reload to read them)'}</p>
+                  {(() => {
+                    const ids = routeTimetableIds(config.routes);
+                    const found = ids.filter(id => config.timetables?.[id]).length;
+                    return (
+                      <div className="flex flex-wrap items-center gap-3 mb-2">
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Route timetables (GET /timetables)</p>
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${found === ids.length ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{found} / {ids.length} read</span>
+                        <button onClick={readTimetables} disabled={ttLoading} className="text-[11px] font-bold text-[#002D72] underline disabled:opacity-40">{ttLoading ? 'Reading…' : 'Read the timetables again'}</button>
+                        {found < ids.length && <span className="text-[10px] text-gray-400">missing: {ids.filter(id => !config.timetables?.[id]).slice(0, 8).join(', ')} — see API Logs for the calls</span>}
+                      </div>
+                    );
+                  })()}
                   <table className="text-[11px]">
                     <thead><tr className="text-left text-gray-400"><th className="pr-3">Route</th><th className="pr-3">Transit</th><th className="pr-3">Fees</th>{TIMETABLE_KINDS.map(k => <th key={k.key} className="pr-3">{k.label}</th>)}</tr></thead>
                     <tbody>
@@ -188,6 +206,10 @@ const StepDeliveryRoutes: React.FC = () => {
                             </p>
                             {rep.status !== 'not-set' && rep.status !== 'not-found' && <TimetableWeek report={rep} width={250} />}
                             <p className="text-[10px] text-gray-500">{rep.summary}</p>
+                            {route[k.key] && config.timetables?.[route[k.key]!] && (
+                              <details><summary className="text-[10px] text-gray-400 cursor-pointer">timetable JSON</summary>
+                                <pre className="max-h-48 overflow-auto bg-gray-900 text-gray-100 p-2 rounded text-[10px]">{JSON.stringify(config.timetables[route[k.key]!], null, 2)}</pre></details>
+                            )}
                             {rep.exceptions.length > 0 && (
                               <details><summary className="text-[10px] text-gray-400 cursor-pointer">{rep.exceptions.length} dated span(s)</summary>
                                 {rep.exceptions.slice(0, 30).map((x, i) => <p key={i} className="text-[10px] text-gray-500">{x}</p>)}</details>

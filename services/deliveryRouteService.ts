@@ -468,6 +468,15 @@ export const transitIssue = (r: DeliveryRoute): string => {
   return '';
 };
 
+// Reads again only the timetables of the routes / execution times of the loaded configuration.
+export const reloadTimetables = async (config: DeliveryConfig): Promise<DeliveryConfig> => {
+  const ids = [...new Set([...routeTimetableIds(config.routes), ...(config.executionTimes || []).map(e => e.timetable_id).filter(Boolean) as string[]])];
+  const timetables = await fetchTimetables(ids);
+  const next = { ...config, timetables };
+  deliveryConfigStore.set(next);
+  return next;
+};
+
 // ---- Execution times: duration ("2h", "30m", "1d") and timetable
 export const durationMinutes = (d?: string): number | null => {
   if (!d) return null;
