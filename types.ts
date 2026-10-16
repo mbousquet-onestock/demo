@@ -111,7 +111,16 @@ export interface SiteProfile {
   id: string;
   label: string;
   siteId: string;
-  // Token of this site (stored encrypted in the database).
+  // Own token of this site (stored encrypted in the database), used when tokenId is not set.
+  token: string;
+  // Shared token used by this site (ApiTokenProfile id).
+  tokenId?: string;
+}
+
+// Token shared by several sites (stored encrypted in the database).
+export interface ApiTokenProfile {
+  id: string;
+  label: string;
   token: string;
 }
 
@@ -133,6 +142,7 @@ export interface AppSettings {
   // Sites / URLs defined in API Settings; apiUrl, siteId and token hold the selected ones.
   sites?: SiteProfile[];
   apiUrls?: ApiUrlProfile[];
+  tokens?: ApiTokenProfile[];
   activeSiteId?: string;
   activeUrlId?: string;
   // OpenAI key for AI generation (optional when OPENAI_API_KEY is set on the server; stored encrypted).

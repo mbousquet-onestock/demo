@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { AppSettings, OnestockApiVersion, SiteProfile, ApiUrlProfile } from '../types';
+import { AppSettings, OnestockApiVersion, SiteProfile, ApiUrlProfile, ApiTokenProfile } from '../types';
 import {
   getApiTarget, missingTargetFields, buildUrl, onestockRequest, describeCallError,
 } from '../services/onestockClient';
-import { activeProfiles, selectSite, selectUrl, resolveUrl, newProfileId, DEFAULT_API_URLS } from '../services/apiProfiles';
+import { activeProfiles, selectSite, selectUrl, resolveUrl, newProfileId, tokenOf, DEFAULT_API_URLS } from '../services/apiProfiles';
 
 interface ApiTargetSettingsProps {
   settings: AppSettings;
@@ -25,18 +25,22 @@ const ApiTargetSettings: React.FC<ApiTargetSettingsProps> = ({ settings, onSave 
     setTestResult(null);
     onSave({ ...settings, ...patch });
   };
-  const { sites, urls, site: activeSite, url: activeUrl } = activeProfiles(settings);
+  const { sites, urls, tokens, site: activeSite, url: activeUrl } = activeProfiles(settings);
   const [shown, setShown] = useState<Set<string>>(new Set());
 
-  // Editing the selected site / URL also updates the values used by the calls.
-  const saveSites = (next: SiteProfile[]) => {
-    const patch: Partial<AppSettings> = { sites: next, apiUrls: urls };
+  // Editing the selected site / URL / shared token also updates the values used by the calls.
+  const saveSites = (next: SiteProfile[], nextTokens: ApiTokenProfile[] = tokens) => {
+    const patch: Partial<AppSettings> = { sites: next, apiUrls: urls, tokens: nextTokens };
     const active = activeSite && next.find(x => x.id === activeSite.id);
-    if (active) Object.assign(patch, { siteId: active.siteId, token: active.token, ...(activeUrl ? { apiUrl: resolveUrl(activeUrl.url, active.siteId) } : {}) });
+    if (active) Object.assign(patch, { siteId: active.siteId, token: tokenOf(active, nextTokens), ...(activeUrl ? { apiUrl: resolveUrl(activeUrl.url, active.siteId) } : {}) });
     set(patch);
   };
+  const saveTokens = (next: ApiTokenProfile[]) =>
+    // A deleted shared token: its sites keep an empty own token.
+    saveSites(sites.map(x => (x.tokenId && !next.some(t => t.id === x.tokenId) ? { ...x, tokenId: undefined, token: '' } : x)), next);
+  const editToken = (id: string, field: keyof ApiTokenProfile, value: string) => saveTokens(tokens.map(x => (x.id === id ? { ...x, [field]: value } : x)));
   const saveUrls = (next: ApiUrlProfile[]) => {
-    const patch: Partial<AppSettings> = { sites, apiUrls: next };
+    const patch: Partial<AppSettings> = { sites, apiUrls: next, tokens };
     const active = activeUrl && next.find(x => x.id === activeUrl.id);
     if (active) patch.apiUrl = resolveUrl(active.url, settings.siteId);
     set(patch);
@@ -89,22 +93,71 @@ const ApiTargetSettings: React.FC<ApiTargetSettingsProps> = ({ settings, onSave 
               <input value={x.label} onChange={e => editSite(x.id, 'label', e.target.value)} placeholder="Label (e.g. Client X qualif)" className={cellInput} />
               <input value={x.siteId} onChange={e => editSite(x.id, 'siteId', e.target.value.trim())} placeholder="Site ID (c500)" className={cellInput + ' font-mono'} />
               <div className="flex gap-1">
-                <input
-                  type={shown.has(x.id) ? 'text' : 'password'}
-                  value={x.token}
-                  onChange={e => editSite(x.id, 'token', e.target.value.trim())}
-                  placeholder="Token (POST /login)"
-                  autoComplete="off"
-                  className={cellInput + ' font-mono'}
-                />
-                <button onClick={() => setShown(prev => { const n = new Set(prev); n.has(x.id) ? n.delete(x.id) : n.add(x.id); return n; })} className="px-2 text-[10px] font-bold text-onestock-blue">{shown.has(x.id) ? 'Hide' : 'Show'}</button>
+                <select
+                  value={x.tokenId || ''}
+                  onChange={e => saveSites(sites.map(y => (y.id === x.id ? { ...y, tokenId: e.target.value || undefined } : y)))}
+                  className={cellInput + (x.tokenId ? '' : ' max-w-[150px]')}
+                  title="Own token of this site, or a token shared with other sites"
+                >
+                  <option value="">Own token</option>
+                  {tokens.map(t => <option key={t.id} value={t.id}>Shared: {t.label || 'token'}</option>)}
+                </select>
+                {!x.tokenId && (
+                  <>
+                    <input
+                      type={shown.has(x.id) ? 'text' : 'password'}
+                      value={x.token}
+                      onChange={e => editSite(x.id, 'token', e.target.value.trim())}
+                      placeholder="Token (POST /login)"
+                      autoComplete="off"
+                      className={cellInput + ' font-mono'}
+                    />
+                    <button onClick={() => setShown(prev => { const n = new Set(prev); n.has(x.id) ? n.delete(x.id) : n.add(x.id); return n; })} className="px-2 text-[10px] font-bold text-onestock-blue">{shown.has(x.id) ? 'Hide' : 'Show'}</button>
+                  </>
+                )}
               </div>
               <div className="flex items-center gap-2 justify-end">
                 {isActive
                   ? <span className="text-[10px] font-bold text-[#002D72] bg-blue-100 px-2 py-1 rounded">SELECTED</span>
-                  : <button onClick={() => set(selectSite({ ...settings, sites, apiUrls: urls }, x.id))} disabled={!x.siteId} className="px-2 py-1 text-[11px] font-bold text-onestock-blue border border-onestock-blue/40 rounded hover:bg-blue-50 disabled:opacity-40">Use</button>}
+                  : <button onClick={() => set(selectSite({ ...settings, sites, apiUrls: urls, tokens }, x.id))} disabled={!x.siteId} className="px-2 py-1 text-[11px] font-bold text-onestock-blue border border-onestock-blue/40 rounded hover:bg-blue-50 disabled:opacity-40">Use</button>}
                 <button
                   onClick={() => window.confirm(`Delete the site "${x.label || x.siteId}"?`) && saveSites(sites.filter(y => y.id !== x.id))}
+                  className="px-1.5 text-gray-400 hover:text-red-600"
+                  title="Delete"
+                >✕</button>
+              </div>
+            </div>
+          );
+        })}
+      </section>
+
+      {/* Shared tokens */}
+      <section className="space-y-3 mb-8">
+        <div className="flex items-center justify-between">
+          <h3 className={labelClass + ' mb-0'}>Shared tokens (one token for several sites)</h3>
+          <button onClick={() => saveTokens([...tokens, { id: newProfileId(), label: '', token: '' }])} className="text-xs font-bold text-onestock-blue hover:underline">+ Add a shared token</button>
+        </div>
+        {tokens.length === 0 && <p className="text-xs text-gray-400">None: each site uses its own token. Add a shared token, then pick it in the sites using it.</p>}
+        {tokens.map(t => {
+          const users = sites.filter(x => x.tokenId === t.id);
+          return (
+            <div key={t.id} className="grid grid-cols-1 md:grid-cols-[1fr_2.5fr_auto] gap-2 items-center p-3 rounded-xl border border-gray-200">
+              <input value={t.label} onChange={e => editToken(t.id, 'label', e.target.value)} placeholder="Label (e.g. Integration user)" className={cellInput} />
+              <div className="flex gap-1">
+                <input
+                  type={shown.has(t.id) ? 'text' : 'password'}
+                  value={t.token}
+                  onChange={e => editToken(t.id, 'token', e.target.value.trim())}
+                  placeholder="Token (POST /login)"
+                  autoComplete="off"
+                  className={cellInput + ' font-mono'}
+                />
+                <button onClick={() => setShown(prev => { const n = new Set(prev); n.has(t.id) ? n.delete(t.id) : n.add(t.id); return n; })} className="px-2 text-[10px] font-bold text-onestock-blue">{shown.has(t.id) ? 'Hide' : 'Show'}</button>
+              </div>
+              <div className="flex items-center gap-2 justify-end">
+                <span className="text-[10px] text-gray-400" title={users.map(u => u.label || u.siteId).join(', ')}>{users.length} site(s)</span>
+                <button
+                  onClick={() => window.confirm(`Delete the shared token "${t.label || 'token'}"?${users.length ? ` ${users.length} site(s) will have no token.` : ''}`) && saveTokens(tokens.filter(y => y.id !== t.id))}
                   className="px-1.5 text-gray-400 hover:text-red-600"
                   title="Delete"
                 >✕</button>
@@ -137,7 +190,7 @@ const ApiTargetSettings: React.FC<ApiTargetSettingsProps> = ({ settings, onSave 
               <div className="flex items-center gap-2 justify-end">
                 {isActive
                   ? <span className="text-[10px] font-bold text-[#002D72] bg-blue-100 px-2 py-1 rounded">SELECTED</span>
-                  : <button onClick={() => set(selectUrl({ ...settings, sites, apiUrls: urls }, x.id))} disabled={!/^https?:\/\/./.test(x.url)} className="px-2 py-1 text-[11px] font-bold text-onestock-blue border border-onestock-blue/40 rounded hover:bg-blue-50 disabled:opacity-40">Use</button>}
+                  : <button onClick={() => set(selectUrl({ ...settings, sites, apiUrls: urls, tokens }, x.id))} disabled={!/^https?:\/\/./.test(x.url)} className="px-2 py-1 text-[11px] font-bold text-onestock-blue border border-onestock-blue/40 rounded hover:bg-blue-50 disabled:opacity-40">Use</button>}
                 <button
                   onClick={() => window.confirm(`Delete the URL "${x.label || x.url}"?`) && saveUrls(urls.filter(y => y.id !== x.id))}
                   className="px-1.5 text-gray-400 hover:text-red-600"

@@ -34,7 +34,8 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
   sub-orders); an emptied set / batch is deleted. Nothing is deleted in OneStock. Sub-folders: a project named `Client/Phase 1`
   is the sub-folder `Phase 1` of `Client`; selecting a folder replays it with its sub-folders (optional). Calls can be
   moved to another (new) sub-folder, and a folder can be renamed / moved with all its sub-folders.
-- **API Settings**: the sites (label, site ID and token returned by `POST /login`) and the API URLs (label, URL where
+- **API Settings**: the sites (label, site ID, and their own token returned by `POST /login` or a shared token
+  used by several sites) and the API URLs (label, URL where
   `{site_id}` is replaced by the selected site; Qualif / Production by default), plus the API version. The site and
   the URL used by every call are chosen in the **top bar** dropdowns (QUALIF / PROD badge). Payloads keep
   `{{site_id}}` / `{{token}}` variables, resolved at call time. "Test token" calls `GET /sales_channels`.
