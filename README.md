@@ -60,6 +60,10 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
   (in no origin zone, no route from its zones, destination not covered by the routes), on a map and in a table.
   Zone matching approximates the OneStock rules; sales channel, delivery method, timetables and constraints are not
   evaluated yet.
+  **Delivery promise**: runs `GET /delivery_promises` for the item / destination (sales channel, delivery methods, qty,
+  `debug.all`, fields `delivery_options.delivery_routes` / `excluded_line_items`; the payload can be edited) and shows
+  per delivery option the status, ETA, routes used (matched with the configured routes), the failure reason with its
+  meaning and what to check, compared with the local analysis, plus the debug data; the call can be saved.
 - **Manual Steps**: checklist of the steps to perform by hand (OMC configuration, checks…), per project: status
   (to do / in progress / done), details, ordering, progress, copy as a Markdown checklist; synced to the database.
 - **API Explorer**: all GET routes of the OneStock spec (`data/onestockGetEndpoints.json`, generated from the

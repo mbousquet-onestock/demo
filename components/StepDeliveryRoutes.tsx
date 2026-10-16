@@ -6,6 +6,7 @@ import {
 import { useApiTarget, missingTargetFields } from '../services/onestockClient';
 import DeliveryRoutesGraph from './DeliveryRoutesGraph';
 import DeliveryMap from './DeliveryMap';
+import DeliveryPromisePanel from './DeliveryPromisePanel';
 
 const inputClass = 'px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-[#002D72]';
 const card = 'bg-white rounded-2xl border border-gray-200 shadow-sm';
@@ -258,6 +259,14 @@ const StepDeliveryRoutes: React.FC = () => {
                   </p>
                 </>
               )}
+
+              <DeliveryPromisePanel
+                config={config}
+                itemId={itemId.trim()}
+                country={country.trim().toUpperCase()}
+                zip={zip.trim()}
+                analyses={analysedFor && analysedFor.item === itemId.trim() ? analyses : []}
+              />
             </div>
           )}
         </>
