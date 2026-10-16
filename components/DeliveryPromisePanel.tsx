@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { onestockRequest, describeCallError, SITE_ID_VAR, TOKEN_VAR } from '../services/onestockClient';
+import { onestockRequest, describeCallError, SITE_ID_VAR, TOKEN_VAR, useApiTarget } from '../services/onestockClient';
+import { fetchSalesChannels, SalesChannelInfo } from '../services/salesChannelService';
 import { settingsStore } from '../services/appStores';
 import { savePayload, getLastProject } from '../services/payloadStore';
 import { DeliveryConfig, EndpointAnalysis, carrierLabel } from '../services/deliveryRouteService';
@@ -36,8 +37,25 @@ const fmt = (t?: number) => (t ? new Date(t * 1000).toLocaleString() : '—');
 
 const DeliveryPromisePanel: React.FC<Props> = ({ config, itemId, country, zip, analyses }) => {
   const settings = settingsStore.use();
-  const channels = settings.salesChannelsCache || [];
+  const target = useApiTarget();
+  const [channels, setChannels] = useState<SalesChannelInfo[]>(settings.salesChannelsCache || []);
+  const [channelsState, setChannelsState] = useState<string | null>(null);
   const [salesChannel, setSalesChannel] = useState(settings.salesChannel || channels[0]?.id || '');
+  // Sales channels of the selected site (GET /sales_channels), reloaded when the site changes.
+  const loadChannels = async () => {
+    setChannelsState('Loading…');
+    try {
+      const list = await fetchSalesChannels();
+      setChannels(list);
+      settingsStore.set(prev => ({ ...prev, salesChannelsCache: list }));
+      setSalesChannel(prev => (list.some(c => c.id === prev) ? prev : list[0]?.id || ''));
+      setEdited(null);
+      setChannelsState(list.length ? null : 'No sales channel returned.');
+    } catch (err: any) {
+      setChannelsState(err?.message || String(err));
+    }
+  };
+  useEffect(() => { loadChannels(); }, [target.siteId, target.baseUrl, target.token]);
   const [methods, setMethods] = useState('standard');
   const [qty, setQty] = useState(1);
   const [debug, setDebug] = useState(true);
@@ -97,9 +115,17 @@ const DeliveryPromisePanel: React.FC<Props> = ({ config, itemId, country, zip, a
         <p className="text-xs text-gray-500">Asks OneStock for the promise of this article and destination, with the routes used and the debug details, to compare with the analysis above.</p>
       </div>
       <div className="flex flex-wrap items-end gap-3">
-        <label className="flex flex-col gap-1"><span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Sales channel</span>
-          <input value={salesChannel} onChange={e => { setSalesChannel(e.target.value); setEdited(null); }} list="dp-channels" className="px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg w-40 font-mono" />
-          <datalist id="dp-channels">{channels.map(c => <option key={c.id} value={c.id}>{c.name || c.description}</option>)}</datalist>
+        <label className="flex flex-col gap-1"><span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+          Sales channel <button type="button" onClick={loadChannels} className="ml-1 normal-case tracking-normal text-[#002D72] underline" title="GET /sales_channels">refresh</button>
+        </span>
+          <select value={salesChannel} onChange={e => { setSalesChannel(e.target.value); setEdited(null); }} className="px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg w-64">
+            {!channels.some(c => c.id === salesChannel) && <option value={salesChannel}>{salesChannel || 'Select…'}</option>}
+            {channels.map(c => {
+              const label = c.name || c.description;
+              return <option key={c.id} value={c.id}>{c.id}{label && label !== c.id ? ` — ${label}` : ''}{c.currency ? ` (${c.currency})` : ''}</option>;
+            })}
+          </select>
+          {channelsState && <span className={`text-[10px] ${channelsState === 'Loading…' ? 'text-gray-400' : 'text-red-600'} max-w-64 break-words`}>{channelsState}</span>}
         </label>
         <label className="flex flex-col gap-1"><span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Delivery methods (comma separated)</span>
           <input value={methods} onChange={e => { setMethods(e.target.value); setEdited(null); }} placeholder="standard, express" className="px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg w-64 font-mono" /></label>
