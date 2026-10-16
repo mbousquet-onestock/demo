@@ -76,6 +76,10 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
   method: the stock returned by its stock request (`debug.stocks`) and the delivery restrictions
   (`debug.delivery_restrictions`). Opening hours of the stock points with stock (`open`, next 7 days opening slots) are
   checked and reported as a possible cause (beyond_time_limit, no_eligible_route).
+  When a delivery method has no (or a partial) result, the stock of the item through the **stock view** of that delivery
+  method is read with `GET /stock_export` (`request_name` = OMC stock query, filtered on the item, per stock point and
+  stock type, optional details): the stock view name is taken from the debug answer when present, else entered once and
+  remembered per delivery method.
 - **Manual Steps**: checklist of the steps to perform by hand (OMC configuration, checks…), per project: status
   (to do / in progress / done), details, ordering, progress, copy as a Markdown checklist; synced to the database.
 - **API Explorer**: all GET routes of the OneStock spec (`data/onestockGetEndpoints.json`, generated from the

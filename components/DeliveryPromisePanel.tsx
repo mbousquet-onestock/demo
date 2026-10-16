@@ -3,6 +3,7 @@ import { onestockRequest, describeCallError, SITE_ID_VAR, TOKEN_VAR, useApiTarge
 import { fetchSalesChannels, SalesChannelInfo } from '../services/salesChannelService';
 import { settingsStore } from '../services/appStores';
 import { savePayload, getLastProject } from '../services/payloadStore';
+import StockViewCheck from './StockViewCheck';
 import { DeliveryConfig, EndpointAnalysis, carrierLabel, routeTimetableIssues, transitIssue, executionTimeIssue, endpointExecutionTimes, RouteEndpoint } from '../services/deliveryRouteService';
 
 interface Props {
@@ -146,6 +147,18 @@ const DeliveryPromisePanel: React.FC<Props> = ({ config, itemId, country, zip, a
     if (own.length) return own;
     return findByKey(globalPart, re).map(f => ({ ...f, value: forMethod(f.value, String(o.delivery_method || ''), methodList) }));
   };
+  // Stock view names mentioned in the answer (debug: request_name / stock_request / stock_query…).
+  const STOCK_VIEW_KEY = /request_name|stock_request|stock_query|stock_view/i;
+  const stockViewsOf = (o: any) => {
+    const method = String(o.delivery_method || '');
+    // Found in the global debug under another delivery method (debug.delivery_configs.<method>…): not this one's.
+    const global = findByKey(globalPart, STOCK_VIEW_KEY).filter(f => {
+      const segments = f.path.split(/[.[\]]/);
+      return !methodList.some(m => m !== method && segments.includes(m));
+    });
+    return [...new Set([...findByKey(o, STOCK_VIEW_KEY), ...global]
+      .map(f => forMethod(f.value, method, methodList)).filter((v: any) => typeof v === 'string' && v))] as string[];
+  };
   const endpointName = (id: string) => config.endpoints.find(e => e.id === id)?.name;
   const extraKeys = result?.body && typeof result.body === 'object' ? Object.keys(result.body).filter(k => k !== 'delivery_options') : [];
   const withStock = analyses.filter(a => a.quantity > 0);
@@ -276,6 +289,9 @@ const DeliveryPromisePanel: React.FC<Props> = ({ config, itemId, country, zip, a
                     </div>
                   );
                 })()}
+                {(o.status === 'none' || /partial/.test(o.status || '') || !o.status) && (
+                  <StockViewCheck config={config} itemId={itemId} deliveryMethod={String(o.delivery_method || '')} suggestions={stockViewsOf(o)} auto />
+                )}
                 {reason && (
                   <div className="p-3 bg-red-50 border border-red-100 rounded-lg space-y-1">
                     <p className="text-red-800"><strong>Why:</strong> {reason.meaning}</p>
