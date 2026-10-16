@@ -371,7 +371,7 @@ export type TimetableKind = typeof TIMETABLE_KINDS[number]['key'];
 export const routeTimetableIds = (routes: DeliveryRoute[]) =>
   [...new Set(routes.flatMap(r => TIMETABLE_KINDS.map(k => r[k.key])).filter(Boolean) as string[])];
 
-// GET /timetables (filters.ids), then GET /timetables/{id} for the ones not returned.
+// Route / execution time timetables: GET /timetables (filters.ids), then the whole list, then GET /timetables/{id}.
 export const fetchTimetables = async (ids: string[]): Promise<Record<string, Timetable>> => {
   const out: Record<string, Timetable> = {};
   if (ids.length === 0) return out;
@@ -380,6 +380,14 @@ export const fetchTimetables = async (ids: string[]): Promise<Record<string, Tim
       const body = await get('/timetables', { filters: { ids: ids.slice(i, i + 100) } });
       arrayIn(body, ['timetables']).forEach((t: any) => { if (t && t.id) out[String(t.id)] = t; });
     } catch { /* fallback below */ }
+  }
+  // Some sites ignore filters.ids: read the whole list once and keep the ones needed.
+  if (ids.some(x => !out[x])) {
+    try {
+      arrayIn(await get('/timetables', {}), ['timetables']).forEach((t: any) => {
+        if (t && t.id && ids.includes(String(t.id)) && !out[String(t.id)]) out[String(t.id)] = t;
+      });
+    } catch { /* per id below */ }
   }
   for (const id of ids.filter(x => !out[x])) {
     try {
