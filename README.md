@@ -52,6 +52,14 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
   Generated batches are saved under a project (synced to the database) and created in OneStock: parent orders with
   `POST /parent_orders` (v4) then sub-orders with `POST /orders` (v3 / v4), status per order and retry of the failed ones.
   Several saved batches can be merged into one (duplicate parent orders ignored, creation results kept).
+- **Delivery Routes**: reads the Delivery Promise configuration of the selected site (`GET /delivery_routes`,
+  `GET /zones`, `GET /endpoints`) and shows it: graph origin zones → destination zones (one colour per carrier, route
+  detail with transit times, timetables and constraints), zones with their criteria and the stock points they contain.
+  **Article analysis**: for an item and a destination (country, zip), reads the stock per stock point (`GET /stocks`
+  and/or the saved `PATCH /stock_import` payloads), then tells for each stock point whether it can deliver and why not
+  (in no origin zone, no route from its zones, destination not covered by the routes), on a map and in a table.
+  Zone matching approximates the OneStock rules; sales channel, delivery method, timetables and constraints are not
+  evaluated yet.
 - **Manual Steps**: checklist of the steps to perform by hand (OMC configuration, checks…), per project: status
   (to do / in progress / done), details, ordering, progress, copy as a Markdown checklist; synced to the database.
 - **API Explorer**: all GET routes of the OneStock spec (`data/onestockGetEndpoints.json`, generated from the

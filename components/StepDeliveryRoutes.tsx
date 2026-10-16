@@ -1,0 +1,269 @@
+import React, { useMemo, useState } from 'react';
+import {
+  deliveryConfigStore, loadDeliveryConfig, matchZone, placeOfEndpoint, zoneSummary, carrierLabel, transitLabel,
+  fetchItemStock, savedImportStock, analyseDelivery, VERDICT_LABELS, EndpointAnalysis, StockLine, Verdict, RouteEndpoint,
+} from '../services/deliveryRouteService';
+import { useApiTarget, missingTargetFields } from '../services/onestockClient';
+import DeliveryRoutesGraph from './DeliveryRoutesGraph';
+import DeliveryMap from './DeliveryMap';
+
+const inputClass = 'px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-[#002D72]';
+const card = 'bg-white rounded-2xl border border-gray-200 shadow-sm';
+type View = 'routes' | 'zones' | 'analysis';
+
+// Delivery Promise configuration: delivery routes between zones, stock points of each zone, and who can deliver an
+// article (stock per stock point × routes × destination).
+const StepDeliveryRoutes: React.FC = () => {
+  const config = deliveryConfigStore.use();
+  const target = useApiTarget();
+  const missing = missingTargetFields(target);
+  const [loading, setLoading] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<View>('routes');
+  const [selectedRoute, setSelectedRoute] = useState<string | null>(null);
+  const [openZone, setOpenZone] = useState<string | null>(null);
+
+  // Article analysis
+  const [itemId, setItemId] = useState('');
+  const [country, setCountry] = useState('FR');
+  const [zip, setZip] = useState('');
+  const [useLive, setUseLive] = useState(true);
+  const [useSaved, setUseSaved] = useState(true);
+  const [stock, setStock] = useState<StockLine[] | null>(null);
+  const [stockNotice, setStockNotice] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
+  const [analysedFor, setAnalysedFor] = useState<{ item: string; country: string; zip: string } | null>(null);
+
+  const load = async () => {
+    setError(null);
+    try {
+      await loadDeliveryConfig(setLoading);
+    } catch (err: any) {
+      setError(err?.message || String(err));
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const zonesById = useMemo(() => new Map((config?.zones || []).map(z => [z.id, z])), [config]);
+  // Stock points matching each zone.
+  const zoneEndpoints = useMemo(() => {
+    const map = new Map<string, RouteEndpoint[]>();
+    if (!config) return map;
+    config.zones.forEach(z => map.set(z.id, config.endpoints.filter(ep => matchZone(z, placeOfEndpoint(ep), zonesById).match)));
+    return map;
+  }, [config, zonesById]);
+  const endpointCounts = useMemo(() => new Map([...zoneEndpoints.entries()].map(([k, v]) => [k, v.length])), [zoneEndpoints]);
+
+  const analyse = async () => {
+    if (!config || !itemId.trim()) return;
+    setLoading('Reading the stock of the article…');
+    setStockNotice(null);
+    setError(null);
+    const lines: StockLine[] = [];
+    const notes: string[] = [];
+    try {
+      if (useLive) {
+        try {
+          const live = await fetchItemStock(itemId.trim());
+          lines.push(...live);
+          notes.push(`${live.length} stock line(s) from OneStock (GET /stocks)`);
+        } catch (err: any) {
+          notes.push(`GET /stocks failed: ${err?.message || err}`);
+        }
+      }
+      if (useSaved) {
+        const saved = savedImportStock(itemId.trim()).filter(s => !lines.some(l => l.endpoint_id === s.endpoint_id));
+        lines.push(...saved);
+        notes.push(`${saved.length} from the saved /stock_import payloads`);
+      }
+      setStock(lines);
+      setStockNotice(notes.join(' · '));
+      setAnalysedFor({ item: itemId.trim(), country: country.trim().toUpperCase(), zip: zip.trim() });
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const analyses: EndpointAnalysis[] = useMemo(() => {
+    if (!config || !stock || !analysedFor) return [];
+    return analyseDelivery(config, stock, { country: analysedFor.country || undefined, zip: analysedFor.zip || undefined });
+  }, [config, stock, analysedFor]);
+  const withStock = analyses.filter(a => a.quantity > 0);
+  const counts = analyses.reduce((m, a) => m.set(a.verdict, (m.get(a.verdict) || 0) + 1), new Map<Verdict, number>());
+  const deliveringRouteIds = useMemo(() => new Set(withStock.flatMap(a => a.deliveringRoutes.map(r => r.id))), [withStock]);
+  const order: Verdict[] = ['deliverable', 'destination-not-covered', 'no-route', 'no-origin-zone', 'no-stock'];
+  const listed = (showAll ? analyses : withStock).sort((a, b) => order.indexOf(a.verdict) - order.indexOf(b.verdict) || b.quantity - a.quantity);
+
+  const route = config?.routes.find(r => r.id === selectedRoute);
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-500 pb-20">
+      <div className="flex flex-wrap items-start gap-4">
+        <div className="flex-1 min-w-[260px]">
+          <h2 className="text-2xl font-bold text-[#002D72]">Delivery Routes</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            Delivery routes (<span className="font-mono">/delivery_routes</span>) between zones (<span className="font-mono">/zones</span>),
+            stock points (<span className="font-mono">/endpoints</span>) and who can deliver an article.
+          </p>
+          {config && (
+            <p className="text-xs text-gray-400 mt-1">
+              Site <strong>{config.site}</strong> · read {new Date(config.loadedAt).toLocaleString()} · {config.routes.length} route(s) · {config.zones.length} zone(s) · {config.endpoints.length} stock point(s)
+              {config.site !== target.siteId && <span className="text-amber-600"> · another site is selected now: reload</span>}
+            </p>
+          )}
+        </div>
+        <button onClick={load} disabled={!!loading || !!missing} className="px-4 py-2 text-xs font-bold text-white bg-[#002D72] rounded-lg hover:bg-[#001F4D] disabled:opacity-40">
+          {loading || (config ? 'Reload from OneStock' : 'Load from OneStock')}
+        </button>
+      </div>
+      {missing && <p className="text-sm text-amber-700">Missing in API Settings: {missing}</p>}
+      {error && <p className="p-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg break-words">{error}</p>}
+
+      {config && (
+        <>
+          <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
+            {([['routes', `Routes (${config.routes.length})`], ['zones', `Zones (${config.zones.length})`], ['analysis', 'Article analysis']] as [View, string][]).map(([v, label]) => (
+              <button key={v} onClick={() => setView(v)} className={`px-4 py-1.5 text-xs font-bold rounded-lg ${view === v ? 'bg-white text-[#002D72] shadow-sm' : 'text-gray-500'}`}>{label}</button>
+            ))}
+          </div>
+
+          {view === 'routes' && (
+            <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_300px] gap-4 items-start">
+              <div className={`${card} p-5 min-w-0`}>
+                <DeliveryRoutesGraph routes={config.routes} zones={config.zones} endpointCounts={endpointCounts} selectedId={selectedRoute} onSelect={setSelectedRoute} />
+              </div>
+              <div className={`${card} p-5 text-xs space-y-3 xl:sticky xl:top-4`}>
+                {!route ? <p className="text-gray-400">Click a route to see its detail.</p> : (
+                  <>
+                    <p className="text-sm font-bold text-gray-900 break-all">{route.id}</p>
+                    <p><strong>{route.origin_zone_id}</strong> → <strong>{route.destination_zone_id}</strong></p>
+                    <p>Carrier: <strong>{carrierLabel(route)}</strong>{transitLabel(route) && <> · transit <strong>{transitLabel(route)}</strong></>}</p>
+                    {[['Delivery timetable', route.delivery_timetable_id], ['Opening timetable', route.opening_timetable_id], ['Pickup timetable', route.pickup_timetable_id]]
+                      .filter(([, v]) => v).map(([k, v]) => <p key={k as string} className="text-gray-500">{k}: <span className="font-mono">{v}</span></p>)}
+                    {route.constraints?.order_constraints?.length ? (
+                      <div><p className="font-bold text-gray-500">Order constraints</p>{route.constraints.order_constraints.map((c, i) => <p key={i} className="font-mono">{c.name} {c.op} {JSON.stringify(c.value)}</p>)}</div>
+                    ) : null}
+                    {route.constraints?.parcel_constraints?.length ? (
+                      <div><p className="font-bold text-gray-500">Parcel constraints</p>{route.constraints.parcel_constraints.map((c, i) => <p key={i} className="font-mono">{c.formula} {c.op} {JSON.stringify(c.value)}</p>)}</div>
+                    ) : null}
+                    {[route.origin_zone_id, route.destination_zone_id].map((zid, i) => {
+                      const z = zonesById.get(zid || '');
+                      return (
+                        <div key={i} className="pt-2 border-t border-gray-100">
+                          <p className="font-bold text-gray-500">{i === 0 ? 'Origin' : 'Destination'} zone {zid}</p>
+                          <p className="text-gray-600">{z ? zoneSummary(z) : <span className="text-red-600">unknown zone</span>}</p>
+                          {i === 0 && <p className="text-gray-400">{endpointCounts.get(zid || '') ?? 0} stock point(s) in this zone</p>}
+                        </div>
+                      );
+                    })}
+                    <details><summary className="cursor-pointer text-gray-400">JSON</summary><pre className="mt-2 max-h-64 overflow-auto bg-gray-900 text-gray-100 p-2 rounded text-[10px]">{JSON.stringify(route, null, 2)}</pre></details>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
+          {view === 'zones' && (
+            <div className={`${card} overflow-hidden`}>
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50 text-left text-[10px] uppercase tracking-widest text-gray-400">
+                  <tr><th className="px-4 py-3">Zone</th><th className="px-4 py-3">Criteria</th><th className="px-4 py-3">Stock points</th><th className="px-4 py-3">Routes from / to</th></tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {config.zones.map(z => {
+                    const eps = zoneEndpoints.get(z.id) || [];
+                    const from = config.routes.filter(r => r.origin_zone_id === z.id).length;
+                    const to = config.routes.filter(r => r.destination_zone_id === z.id).length;
+                    return (
+                      <React.Fragment key={z.id}>
+                        <tr className="hover:bg-gray-50 cursor-pointer" onClick={() => setOpenZone(openZone === z.id ? null : z.id)}>
+                          <td className="px-4 py-2.5"><p className="font-bold text-gray-900">{z.name || z.id}</p><p className="font-mono text-gray-400">{z.id}</p></td>
+                          <td className="px-4 py-2.5 text-gray-600">{zoneSummary(z)}</td>
+                          <td className="px-4 py-2.5">{eps.length}</td>
+                          <td className="px-4 py-2.5">{from} / {to}{from + to === 0 && <span className="ml-2 text-amber-600">unused</span>}</td>
+                        </tr>
+                        {openZone === z.id && (
+                          <tr><td colSpan={4} className="px-4 pb-3 text-gray-600">
+                            {eps.length ? eps.slice(0, 200).map(e => <span key={e.id} className="inline-block mr-2 mb-1 px-2 py-0.5 bg-gray-100 rounded">{e.name || e.id} <span className="font-mono text-gray-400">{e.id}</span></span>) : 'No stock point in this zone.'}
+                          </td></tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {view === 'analysis' && (
+            <div className="space-y-4">
+              <div className={`${card} p-5 flex flex-wrap items-end gap-3`}>
+                <label className="flex flex-col gap-1"><span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Article (item id)</span>
+                  <input value={itemId} onChange={e => setItemId(e.target.value)} onKeyDown={e => e.key === 'Enter' && analyse()} placeholder="SKU" className={inputClass + ' font-mono w-56'} /></label>
+                <label className="flex flex-col gap-1"><span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Destination country</span>
+                  <input value={country} onChange={e => setCountry(e.target.value.toUpperCase())} placeholder="FR" className={inputClass + ' w-24 font-mono'} /></label>
+                <label className="flex flex-col gap-1"><span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Zip code</span>
+                  <input value={zip} onChange={e => setZip(e.target.value)} placeholder="75001" className={inputClass + ' w-28 font-mono'} /></label>
+                <div className="flex flex-col gap-1 text-xs text-gray-600">
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={useLive} onChange={e => setUseLive(e.target.checked)} />Stock from OneStock (GET /stocks)</label>
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={useSaved} onChange={e => setUseSaved(e.target.checked)} />Saved /stock_import payloads</label>
+                </div>
+                <button onClick={analyse} disabled={!itemId.trim() || !!loading} className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-40">Analyse</button>
+              </div>
+
+              {analysedFor && (
+                <>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm text-gray-700"><strong className="font-mono">{analysedFor.item}</strong> → {analysedFor.country || 'any country'}{analysedFor.zip ? ` ${analysedFor.zip}` : ''}:</span>
+                    {order.filter(v => counts.get(v)).map(v => (
+                      <span key={v} className="text-[11px] font-bold px-2 py-1 rounded-md text-white" style={{ background: VERDICT_LABELS[v].color }}>{counts.get(v)} {VERDICT_LABELS[v].label}</span>
+                    ))}
+                    {stockNotice && <span className="w-full text-[11px] text-gray-400">{stockNotice}</span>}
+                  </div>
+                  {withStock.length === 0 ? (
+                    <p className={`${card} p-6 text-sm text-red-700`}>No stock found for this article: no stock point can deliver it.</p>
+                  ) : counts.get('deliverable') ? null : (
+                    <p className={`${card} p-4 text-sm text-red-700`}>None of the {withStock.length} stock point(s) with stock can deliver this destination: see the reasons below.</p>
+                  )}
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 [&>*]:min-w-0">
+                    <div className={`${card} p-3`}><DeliveryMap analyses={analyses} /></div>
+                    <div className={`${card} p-4 min-w-0`}>
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Routes usable from the stock (highlighted: reach the destination)</p>
+                      <DeliveryRoutesGraph routes={config.routes.filter(r => withStock.some(a => a.routes.some(x => x.id === r.id)))} zones={config.zones} highlight={deliveringRouteIds} />
+                    </div>
+                  </div>
+                  <div className={`${card} overflow-hidden`}>
+                    <div className="px-4 py-2 flex items-center bg-gray-50 border-b border-gray-200">
+                      <span className="flex-1 text-[10px] font-bold text-gray-400 uppercase tracking-widest">Stock points</span>
+                      <label className="flex items-center gap-2 text-[11px] text-gray-600"><input type="checkbox" checked={showAll} onChange={e => setShowAll(e.target.checked)} />Show stock points without stock</label>
+                    </div>
+                    <table className="w-full text-xs">
+                      <tbody className="divide-y divide-gray-100">
+                        {listed.slice(0, 500).map(a => (
+                          <tr key={a.endpoint.id}>
+                            <td className="px-4 py-2 w-56"><p className="font-bold text-gray-900">{(a.endpoint as RouteEndpoint).name || a.endpoint.id}</p><p className="font-mono text-gray-400">{a.endpoint.id}</p></td>
+                            <td className="px-2 py-2 w-16 text-right font-mono">{a.quantity}</td>
+                            <td className="px-4 py-2 w-48"><span className="text-[10px] font-bold px-2 py-0.5 rounded text-white" style={{ background: VERDICT_LABELS[a.verdict].color }}>{VERDICT_LABELS[a.verdict].label}</span></td>
+                            <td className="px-4 py-2 text-gray-600">{a.explanation}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="text-[11px] text-gray-400">
+                    Zone matching is an approximation of the OneStock rules (countries, regions, zip regex, timezones, included / excluded
+                    stock points and zones). Other rules (sales channel, delivery method, timetables, order / parcel constraints, stock
+                    reservations) are not evaluated yet.
+                  </p>
+                </>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
+export default StepDeliveryRoutes;

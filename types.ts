@@ -41,7 +41,8 @@ export enum AppStep {
   API_LOG = 'API_LOG',
   STOCK_POINTS = 'STOCK_POINTS',
   MANUAL_STEPS = 'MANUAL_STEPS',
-  PROJECTS = 'PROJECTS'
+  PROJECTS = 'PROJECTS',
+  DELIVERY_ROUTES = 'DELIVERY_ROUTES'
 }
 
 export interface Endpoint {
