@@ -88,7 +88,40 @@ export interface Timetable {
   // Read from /timetable_versions (current version) or /timetables.
   source?: string;
   versionsCount?: number;
+  // Validity period of the version in force (current_timetable / version from → to, seconds) and the next version.
+  validFrom?: number;
+  validTo?: number;
+  versionId?: string;
+  next?: { from?: number; to?: number; timezone?: string; timespans?: any[] };
+  next_timetable_id?: string;
+  options?: Record<string, boolean>;
 }
+
+// GET /timetables and /timetables/{id} only return the id unless the fields are listed.
+export const TIMETABLE_FIELDS = ['name', 'description', 'type', 'options', 'current_timetable', 'next_timetable', 'next_timetable_id'];
+// Lower-case keys (versions use Start / End / Options).
+const lowerKeys = (o: any) => (o && typeof o === 'object' && !Array.isArray(o) ? Object.fromEntries(Object.entries(o).map(([k, v]) => [k.toLowerCase(), v])) : o);
+const versionBody = (v: any) => {
+  const x = lowerKeys(v);
+  return x && typeof x === 'object' ? { ...x, timespans: Array.isArray(x.timespans) ? x.timespans.map(lowerKeys) : x.timespans } : undefined;
+};
+// Timetable as read from the API → hours (current_timetable / version), validity period and next version.
+export const normalizeTimetable = (raw: any, id?: string): Timetable => {
+  const t: any = { ...raw, id: String(raw?.id ?? id ?? '') };
+  const cur = versionBody(raw?.current_timetable ?? raw?.version ?? raw?.timetable_version?.version);
+  if (cur) {
+    t.hours = { timezone: cur.timezone, timespans: cur.timespans || [] };
+    if (cur.from !== undefined) t.validFrom = toSeconds(cur.from) ?? undefined;
+    if (cur.to !== undefined) t.validTo = toSeconds(cur.to) ?? undefined;
+  }
+  const next = versionBody(raw?.next_timetable);
+  if (next && Object.keys(next).length) t.next = { from: toSeconds(next.from) ?? undefined, to: toSeconds(next.to) ?? undefined, timezone: next.timezone, timespans: next.timespans || [] };
+  return t as Timetable;
+};
+const fmtDate = (sec?: number) => (sec ? new Date(sec * 1000).toLocaleString() : '…');
+// "valid 01/10/2026 → 31/12/2026", '' when the timetable has no period.
+export const timetablePeriod = (t?: Timetable): string =>
+  t && (t.validFrom || t.validTo) ? `${fmtDate(t.validFrom)} → ${fmtDate(t.validTo)}` : '';
 
 // Time of an operation (pick_pack…) and its timetable (GET /execution_times).
 export interface ExecutionTime {
@@ -110,7 +143,7 @@ export interface ScheduledEvent {
   end?: number;
   timezone?: string;
   timetable_types?: string[];
-  links?: { endpoint_ids?: string[]; zone_ids?: string[]; carriers?: string[]; carrier_options?: string[] };
+  links?: { endpoint_ids?: string[]; ruleset_ids?: string[]; zone_ids?: string[]; carriers?: string[]; carrier_options?: string[] };
   options?: { open?: boolean; claim_disabled?: boolean; stock_export_disabled?: boolean };
 }
 
@@ -396,9 +429,8 @@ export type TimetableKind = typeof TIMETABLE_KINDS[number]['key'];
 export const routeTimetableIds = (routes: DeliveryRoute[]) =>
   [...new Set(routes.flatMap(r => TIMETABLE_KINDS.map(k => r[k.key])).filter(Boolean) as string[])];
 
-// Route / execution time timetables: GET /timetables (filters.ids), then the whole list, then GET /timetables/{id}.
-// ---- Timetables of the routes / execution times: GET /timetable_versions (current version of each timetable),
-// then GET /timetables as a fallback.
+// ---- Timetables of the routes / execution times: GET /timetables with fields (current_timetable / next_timetable),
+// then GET /timetable_versions as a fallback.
 const toSeconds = (v: any): number | null => {
   if (v === null || v === undefined || v === '') return null;
   if (typeof v === 'number') return v > 1e12 ? v / 1000 : v;
@@ -412,19 +444,21 @@ const currentVersion = (versions: any[]): any => {
   if (flagged) return flagged;
   const now = Date.now() / 1000;
   const covering = versions.filter(v => {
-    const from = toSeconds(v?.from ?? v?.start_date ?? v?.valid_from ?? v?.start);
-    const to = toSeconds(v?.to ?? v?.end_date ?? v?.valid_to ?? v?.end);
+    const b = versionBody(v?.version) || {};
+    const from = toSeconds(b.from ?? v?.from ?? v?.start_date ?? v?.valid_from ?? v?.start);
+    const to = toSeconds(b.to ?? v?.to ?? v?.end_date ?? v?.valid_to ?? v?.end);
     return (from === null || from <= now) && (to === null || to >= now) && (from !== null || to !== null);
   });
   const pool = covering.length ? covering : versions;
-  return [...pool].sort((x, y) => (Number(y?.version ?? y?.version_number ?? 0) - Number(x?.version ?? x?.version_number ?? 0))
+  const num = (v: any) => Number(typeof v?.version === 'object' ? 0 : v?.version ?? v?.version_number ?? 0);
+  return [...pool].sort((x, y) => (num(y) - num(x))
     || String(y?.updated_at ?? y?.created_at ?? '').localeCompare(String(x?.updated_at ?? x?.created_at ?? '')))[0];
 };
 // Timetable id of a version entry (versions may carry the timetable id apart from their own id).
 const versionTimetableId = (v: any): string => String(v?.timetable_id ?? v?.timetable?.id ?? v?.id ?? '');
 const fromVersion = (id: string, v: any, count: number): Timetable => {
   const inner = v?.timetable && typeof v.timetable === 'object' ? { ...v.timetable, ...v } : v;
-  return { ...inner, id, versionsCount: count, source: '/timetable_versions' } as Timetable;
+  return { ...normalizeTimetable(inner, id), id, versionId: v?.id, versionsCount: count, source: '/timetable_versions' } as Timetable;
 };
 
 export const fetchTimetables = async (ids: string[]): Promise<Record<string, Timetable>> => {
@@ -433,9 +467,27 @@ export const fetchTimetables = async (ids: string[]): Promise<Record<string, Tim
   const keep = (id: string, versions: any[]) => {
     // Empty answers ({}) are not a timetable.
     const v = currentVersion(versions.filter(x => x && typeof x === 'object' && Object.keys(x).length > 0));
-    if (v && (!out[id] || rawSpans(v).length > 0)) out[id] = fromVersion(id, v, versions.length);
+    // Only completes the timetables still without time span.
+    if (v && (!out[id] || (rawSpans(out[id]).length === 0 && rawSpans(v).length > 0))) out[id] = fromVersion(id, v, versions.length);
   };
-  // 1. Versions of the listed timetables.
+  // 1. GET /timetables with the fields (current / next version), filtered on the ids, then the detail.
+  try {
+    arrayIn(await get('/timetables', { filters: { ids, fields: TIMETABLE_FIELDS } }), ['timetables']).forEach((raw: any) => {
+      const id = String(raw?.id || '');
+      const t = normalizeTimetable(raw, id);
+      if (ids.includes(id) && (!out[id] || rawSpans(t).length > 0)) out[id] = { ...t, source: '/timetables' };
+    });
+  } catch { /* detail below */ }
+  for (const id of ids.filter(x => !out[x] || rawSpans(out[x]).length === 0)) {
+    try {
+      const body: any = await get(`/timetables/${encodeURIComponent(id)}`, { fields: TIMETABLE_FIELDS });
+      const raw = body?.timetable || body;
+      const t = raw && typeof raw === 'object' ? normalizeTimetable(raw, id) : null;
+      if (t && (!out[id] || rawSpans(t).length > 0)) out[id] = { ...t, source: '/timetables' };
+    } catch { /* reported as not found */ }
+  }
+  // 2. Fallback: versions of the listed timetables (GET /timetable_versions).
+  if (ids.every(x => out[x] && rawSpans(out[x]).length > 0)) return out;
   for (let i = 0; i < ids.length; i += 100) {
     try {
       const list = arrayIn(await get('/timetable_versions', { filters: { ids: ids.slice(i, i + 100) } }), ['timetable_versions', 'versions', 'timetables']);
@@ -444,30 +496,13 @@ export const fetchTimetables = async (ids: string[]): Promise<Record<string, Tim
       byId.forEach((versions, id) => keep(id, versions));
     } catch { /* per id below */ }
   }
-  // 2. Versions of one timetable (GET /timetable_versions/{id}).
+  // 3. Versions of one timetable (GET /timetable_versions/{id}).
   for (const id of ids.filter(x => !out[x] || rawSpans(out[x]).length === 0)) {
     try {
       const body: any = await get(`/timetable_versions/${encodeURIComponent(id)}`, {});
       const list = arrayIn(body, ['timetable_versions', 'versions', 'timetables']);
       keep(id, list.length ? list : body && typeof body === 'object' ? [body.timetable_version || body.version || body] : []);
     } catch { /* fallback below */ }
-  }
-  // 3. Fallback: GET /timetables (filtered, then detail).
-  const missing = ids.filter(x => !out[x] || rawSpans(out[x]).length === 0);
-  if (missing.length) {
-    try {
-      arrayIn(await get('/timetables', { filters: { ids: missing } }), ['timetables']).forEach((t: any) => {
-        const id = String(t?.id || '');
-        if (missing.includes(id) && (!out[id] || rawSpans(t).length > 0)) out[id] = { ...t, source: '/timetables' };
-      });
-    } catch { /* detail below */ }
-    for (const id of missing.filter(x => !out[x] || rawSpans(out[x]).length === 0)) {
-      try {
-        const body: any = await get(`/timetables/${encodeURIComponent(id)}`, {});
-        const t = body?.timetable || body;
-        if (t && typeof t === 'object' && (!out[id] || rawSpans(t).length > 0)) out[id] = { id, ...t, source: '/timetables' };
-      } catch { /* reported as not found */ }
-    }
   }
   return out;
 };
@@ -492,15 +527,15 @@ export interface TimetableReport {
 const SPAN_KEYS = ['start', 'end', 'from', 'to', 'open', 'close', 'opening', 'closing', 'start_time', 'end_time'];
 export const rawSpans = (t: any): any[] => {
   if (!t || typeof t !== 'object') return [];
-  const direct = [t.hours?.timespans, t.timespans, Array.isArray(t.hours) ? t.hours : null, t.hours?.timespan, t.timetable?.hours?.timespans, t.opening_hours?.timespans]
+  const direct = [t.hours?.timespans, t.current_timetable?.timespans, t.version?.timespans, t.timespans, Array.isArray(t.hours) ? t.hours : null, t.hours?.timespan, t.timetable?.hours?.timespans, t.opening_hours?.timespans]
     .find(a => Array.isArray(a) && a.length);
-  if (direct) return direct as any[];
+  if (direct) return (direct as any[]).map(lowerKeys);
   // Any array of objects carrying a start / end.
   let found: any[] = [];
   const walk = (n: any, depth: number) => {
     if (found.length || !n || typeof n !== 'object' || depth > 6) return;
     if (Array.isArray(n)) {
-      if (n.length && n.every(x => x && typeof x === 'object' && SPAN_KEYS.some(k => k in x))) { found = n; return; }
+      if (n.length && n.every(x => x && typeof x === 'object' && SPAN_KEYS.some(k => k in lowerKeys(x)))) { found = n.map(lowerKeys); return; }
       n.forEach(x => walk(x, depth + 1));
       return;
     }
@@ -557,6 +592,8 @@ export const timetableReport = (id: string | undefined, timetables: Record<strin
   spans.forEach(sp => {
     const { start, end } = sp;
     if (!isFinite(start) || !isFinite(end) || end <= start) return;
+    // Span explicitly closed (options.open false): not an opening.
+    if (sp.options?.open === false && !sp.date) return;
     if (sp.date) {
       const closed = sp.options && Object.entries(sp.options).filter(([, v]) => v).map(([k]) => k).join(', ');
       exceptions.push(`${new Date(start * 1000).toLocaleString()} → ${new Date(end * 1000).toLocaleString()}${closed ? ` (${closed})` : ''}`);
@@ -575,9 +612,16 @@ export const timetableReport = (id: string | undefined, timetables: Record<strin
   const hoursPerWeek = Math.round(seconds / 360) / 10;
   const openDays = days.filter(d => d.length).length;
   const status: TimetableReport['status'] = hoursPerWeek === 0 ? 'empty' : openDays < 5 ? 'partial' : 'ok';
-  const summary = hoursPerWeek === 0
+  const period = timetablePeriod(t);
+  let nextInfo = '';
+  if (t.next) {
+    const n = timetableReport('next', { next: { id: 'next', name: 'next version', hours: { timespans: t.next.timespans } } });
+    nextInfo = ` · next version from ${fmtDate(t.next.from)}: ${n.hoursPerWeek} h / week`;
+  }
+  const extra = `${period ? ` · valid ${period}` : ''}${nextInfo}`;
+  const summary = (hoursPerWeek === 0
     ? `${t.name || id}: no weekly time span${exceptions.length ? ` (${exceptions.length} dated span(s) only)` : ''}${rawSpans(t).length === 0 ? ` — no time span found in the timetable (fields: ${Object.keys(t).join(', ')})` : ''}`
-    : `${t.name || id}: ${hoursPerWeek} h / week, ${openDays} day(s) · ${days.map((d, i) => (d.length ? `${DAYS[i]} ${d.map(x => `${hhmm(x.start)}-${hhmm(x.end)}`).join(',')}` : '')).filter(Boolean).join(' · ')}`;
+    : `${t.name || id}: ${hoursPerWeek} h / week, ${openDays} day(s) · ${days.map((d, i) => (d.length ? `${DAYS[i]} ${d.map(x => `${hhmm(x.start)}-${hhmm(x.end)}`).join(',')}` : '')).filter(Boolean).join(' · ')}`) + extra;
   return { status, days, hoursPerWeek, exceptions, summary };
 };
 
@@ -662,20 +706,20 @@ export const fetchAllTimetables = async (type?: string): Promise<Timetable[]> =>
   const types = type ? [type] : TIMETABLE_TYPES;
   const out = new Map<string, Timetable>();
   for (const t of types) {
-    const body = await get('/timetables', { filters: { type: t } });
+    const body = await get('/timetables', { filters: { type: t, fields: TIMETABLE_FIELDS } });
     arrayIn(body, ['timetables'])
       // Sites that ignore the filter: the type is checked here too.
       .filter((x: any) => x && x.id && (!x.type || x.type === t))
-      .forEach((x: any) => out.set(String(x.id), { ...x, id: String(x.id), type: x.type || t, source: '/timetables' }));
+      .forEach((x: any) => out.set(String(x.id), { ...normalizeTimetable(x), type: x.type || t, source: '/timetables' }));
   }
   return [...out.values()];
 };
 
 export const fetchTimetableDetail = async (id: string): Promise<Timetable> => {
-  const body: any = await get(`/timetables/${encodeURIComponent(id)}`, {});
+  const body: any = await get(`/timetables/${encodeURIComponent(id)}`, { fields: TIMETABLE_FIELDS });
   const t = body?.timetable || body;
   if (!t || typeof t !== 'object') throw new Error(`GET /timetables/${id}: empty answer`);
-  return { ...t, id: String(t.id || id), source: `/timetables/${id}` };
+  return { ...normalizeTimetable(t, id), source: `/timetables/${id}` };
 };
 
 // Where a timetable is used: routes (activity / pickup / delivery) and execution times.
@@ -686,13 +730,15 @@ export const timetableUsages = (id: string, config: DeliveryConfig): string[] =>
 
 // ---- Scheduled events (GET /scheduledevents): dated exceptions of the timetables
 export const EVENT_TIMETABLE_TYPES = ['carrier_pickup_timetable', 'carrier_transit_timetable', 'carrier_delivery_timetable', 'endpoint_timetable'];
+const EVENT_FIELDS = ['id', 'type', 'name', 'description', 'start', 'end', 'timezone', 'links', 'options', 'timetable_types'];
 export const defaultEventsPeriod = (days = 60) => {
   const now = Math.floor(Date.now() / 1000);
   return { from: now - 86400, to: now + days * 86400 };
 };
 
 export const fetchScheduledEvents = async (from: number, to: number): Promise<ScheduledEvent[]> => {
-  const body = await get('/scheduledevents', { filters: { from, to, timetable_types: EVENT_TIMETABLE_TYPES } });
+  // Only the listed fields are returned; the timetable types are filtered here (not a documented filter).
+  const body = await get('/scheduledevents', { filters: { from, to, fields: EVENT_FIELDS } });
   return arrayIn(body, ['scheduled_events', 'scheduledevents', 'events'])
     .filter((e: any) => e && (e.id || e.start))
     .map((e: any) => ({ ...e, id: String(e.id ?? `${e.name}-${e.start}`) }));
@@ -713,11 +759,13 @@ export const eventsForRoute = (r: DeliveryRoute, events: ScheduledEvent[] | unde
   (events || []).filter(e => {
     if (e.timetable_types?.length && !e.timetable_types.some(t => t.startsWith('carrier_'))) return false;
     if (!hasLinks(e)) return true;
+    // Every non-empty link category must match (Time Machine rule); a route has no endpoint / ruleset.
     const l = e.links!;
-    const carrierOk = l.carriers?.length ? l.carriers.includes(r.carrier?.name || '') && (!l.carrier_options?.length || l.carrier_options.includes(r.carrier?.option || '')) : false;
-    const optionOk = !l.carriers?.length && l.carrier_options?.length ? l.carrier_options.includes(r.carrier?.option || '') : false;
-    const zoneOk = l.zone_ids?.length ? [r.origin_zone_id, r.destination_zone_id].some(z => z && l.zone_ids!.includes(z)) : false;
-    return carrierOk || optionOk || zoneOk;
+    if (l.endpoint_ids?.length || l.ruleset_ids?.length) return false;
+    if (l.carriers?.length && !l.carriers.includes(r.carrier?.name || '')) return false;
+    if (l.carrier_options?.length && !l.carrier_options.includes(r.carrier?.option || '')) return false;
+    if (l.zone_ids?.length && ![r.origin_zone_id, r.destination_zone_id].some(z => z && l.zone_ids!.includes(z))) return false;
+    return true;
   });
 
 // Events of a timetable: same type, and linked to a route using it (or to the whole site).

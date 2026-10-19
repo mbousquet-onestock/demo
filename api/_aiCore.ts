@@ -88,10 +88,11 @@ and "body" is exactly the object sent to the OneStock API:
 kind "timetable" (POST /timetables {"timetable": body}) — carrier schedules:
 {"id": "snake_case id", "name": "...", "type": "carrier_pickup_timetable" | "carrier_transit_timetable" | "carrier_delivery_timetable",
  "hours": {"timezone": "IANA timezone, e.g. Europe/Paris",
-           "timespans": [{"start": integer, "end": integer}]}}
+           "timespans": [{"start": integer, "end": integer, "options": {"open": true}}]}}
 Timespans are seconds from Monday 00:00 (0) to the end of the week (604800): day d (0 = Monday … 6 = Sunday) from H1 to H2
 is {"start": d*86400 + H1*3600, "end": d*86400 + H2*3600}. Example Monday-Friday 14:00-17:00 pickup:
 [{"start":50400,"end":61200},{"start":136800,"end":147600},{"start":223200,"end":234000},{"start":309600,"end":320400},{"start":396000,"end":406800}].
+Every timespan carries "options": {"open": true} (omitted from the example for brevity).
 
 kind "zone" (POST /zones {"zone": body}) — origin zones (where stock points are) or destination zones (customer addresses):
 {"id": "snake_case id", "name": "...", "comment": "...",
