@@ -57,6 +57,7 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
   Several saved batches can be merged into one (duplicate parent orders ignored, creation results kept).
   Countries per sales channel (saved in the settings): each order takes a sales channel associated with its destination
   country (a channel without country serves every country); a selected country without channel blocks the generation.
+  "Reset counters" puts the parent order number and the next sub-order number back to 1 (prefix and length kept).
 - **Delivery Routes**: reads the Delivery Promise configuration of the selected site (`GET /delivery_routes`,
   `GET /zones`, `GET /endpoints`) and shows it: graph origin zones → destination zones (one colour per carrier, route
   detail with transit times, timetables and constraints), zones with their criteria and the stock points they contain.
@@ -68,6 +69,8 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
   in the graph, warnings in the analysis and the delivery promise causes).
   Delivery fees per route (`metric_values`, e.g. `cost`): null or not set is flagged (route table / detail, analysis,
   promise causes), and a valid delivery option without `cost` is flagged in the promise result.
+  **Timetables** view: every timetable of the site (`GET /timetables`, filter by type), weekly view, dated spans, JSON,
+  where it is used (routes, execution times) and the referenced timetables that GET /timetables does not return.
   **Execution times** (`GET /execution_times`): operation, duration ("2h", "30m"), execution moment and timetable
   (weekly view), the stock points using them (when GET /endpoints returns their `execution_times`); unreadable durations,
   missing / empty timetables and always_at_start without timetable are flagged, in the analysis and as promise causes.

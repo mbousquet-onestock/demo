@@ -635,3 +635,16 @@ export const feesLabel = (r: DeliveryRoute) => {
   const { entries } = routeFees(r);
   return entries.length ? entries.map(([k, v]) => `${k} ${v ?? 'null'}`).join(' · ') : '';
 };
+
+// ---- Every timetable of the site (GET /timetables, optional type filter)
+export const TIMETABLE_TYPES = ['endpoint_timetable', 'carrier_pickup_timetable', 'carrier_delivery_timetable', 'carrier_transit_timetable', 'execution_time_timetable', 'rule_timetable'];
+export const fetchAllTimetables = async (type?: string): Promise<Timetable[]> => {
+  const body = await get('/timetables', type ? { filters: { type } } : {});
+  return arrayIn(body, ['timetables']).filter((t: any) => t && t.id).map((t: any) => ({ ...t, id: String(t.id), source: '/timetables' }));
+};
+
+// Where a timetable is used: routes (activity / pickup / delivery) and execution times.
+export const timetableUsages = (id: string, config: DeliveryConfig): string[] => [
+  ...config.routes.flatMap(r => TIMETABLE_KINDS.filter(k => r[k.key] === id).map(k => `route ${r.id} (${k.label.toLowerCase()})`)),
+  ...(config.executionTimes || []).filter(e => e.timetable_id === id).map(e => `execution time ${e.id}${e.operation ? ` (${e.operation})` : ''}`),
+];

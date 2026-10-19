@@ -8,10 +8,11 @@ import DeliveryRoutesGraph from './DeliveryRoutesGraph';
 import DeliveryMap from './DeliveryMap';
 import DeliveryPromisePanel from './DeliveryPromisePanel';
 import TimetableWeek, { TIMETABLE_STATUS } from './TimetableWeek';
+import TimetablesView from './TimetablesView';
 
 const inputClass = 'px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-lg outline-none focus:border-[#002D72]';
 const card = 'bg-white rounded-2xl border border-gray-200 shadow-sm';
-type View = 'routes' | 'zones' | 'execution' | 'analysis';
+type View = 'routes' | 'zones' | 'execution' | 'timetables' | 'analysis';
 
 // Delivery Promise configuration: delivery routes between zones, stock points of each zone, and who can deliver an
 // article (stock per stock point × routes × destination).
@@ -132,7 +133,7 @@ const StepDeliveryRoutes: React.FC = () => {
       {config && (
         <>
           <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
-            {([['routes', `Routes (${config.routes.length})`], ['zones', `Zones (${config.zones.length})`], ['execution', `Execution times (${config.executionTimes?.length ?? 0})`], ['analysis', 'Article analysis']] as [View, string][]).map(([v, label]) => (
+            {([['routes', `Routes (${config.routes.length})`], ['zones', `Zones (${config.zones.length})`], ['execution', `Execution times (${config.executionTimes?.length ?? 0})`], ['timetables', 'Timetables'], ['analysis', 'Article analysis']] as [View, string][]).map(([v, label]) => (
               <button key={v} onClick={() => setView(v)} className={`px-4 py-1.5 text-xs font-bold rounded-lg ${view === v ? 'bg-white text-[#002D72] shadow-sm' : 'text-gray-500'}`}>{label}</button>
             ))}
           </div>
@@ -310,6 +311,8 @@ const StepDeliveryRoutes: React.FC = () => {
               )}
             </div>
           )}
+
+          {view === 'timetables' && <TimetablesView config={config} />}
 
           {view === 'analysis' && (
             <div className="space-y-4">

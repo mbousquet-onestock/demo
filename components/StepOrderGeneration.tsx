@@ -185,6 +185,14 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
   };
   const channelsOf = (code: string) => channelsForCountry(fullConfig, code);
 
+  // Counters back to 1: number part of the parent id (prefix and length kept) and next sub-order number.
+  const resetCounters = () => {
+    const m = ids.parentOrderId.match(/^(.*?)(\d+)$/);
+    const parentOrderId = m ? `${m[1]}${'1'.padStart(m[2].length, '0')}` : `${ids.parentOrderId}1`;
+    if (!window.confirm(`Reset the counters?\nParent order id: ${ids.parentOrderId} → ${parentOrderId}\nNext sub-order number: ${ids.startIndex} → 1\n\nIds already used by saved batches are still skipped at generation.`)) return;
+    setIds({ parentOrderId, startIndex: 1 });
+  };
+
   const toggleStrategy = (s: OrderStrategy) =>
     set({ strategies: config.strategies.includes(s) ? config.strategies.filter(x => x !== s) : [...config.strategies, s] });
 
@@ -578,7 +586,10 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
 
           {/* 3. Ids & data */}
           <section className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 space-y-5">
-            <h3 className="text-sm font-bold text-[#002D72]"><span className="inline-flex w-6 h-6 rounded-full bg-[#002D72] text-white text-xs items-center justify-center mr-2">3</span>Ids & customer data</h3>
+            <div className="flex items-center gap-3">
+              <h3 className="flex-1 text-sm font-bold text-[#002D72]"><span className="inline-flex w-6 h-6 rounded-full bg-[#002D72] text-white text-xs items-center justify-center mr-2">3</span>Ids & customer data</h3>
+              <button onClick={resetCounters} className="px-3 py-1.5 text-[11px] font-bold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50" title="Parent order number and sub-order number back to 1">Reset counters</button>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-1">
               <label className={labelTight}>First parent order id</label>
               <label className={labelTight + ' hidden sm:block'}>Sub-order id prefix</label>
