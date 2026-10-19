@@ -26,7 +26,7 @@ const SortOrdersPanel: React.FC<Props> = ({ metrics, version, disabled }) => {
 
   const load = async () => {
     setError(null);
-    try { setOrders(await fetchSortOrders()); } catch (err: any) { setError(err?.message || String(err)); }
+    try { setOrders(await fetchSortOrders(version)); } catch (err: any) { setError(err?.message || String(err)); }
   };
   useEffect(() => {
     load();

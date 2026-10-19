@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { deliveryConfigStore, loadDeliveryConfig, carrierLabel } from '../services/deliveryRouteService';
-import { Metric, METRIC_OPERATORS, METRIC_UNITS, fetchMetrics, saveMetric, deleteMetric, metricUsages, metricKey, metricUnit, readMetric } from '../services/metricService';
+import { Metric, METRIC_OPERATORS, METRIC_UNITS, fetchMetrics, saveMetric, deleteMetric, metricUsages, metricKey, metricUnit, readMetric, lastListAnswers } from '../services/metricService';
 import { useApiTarget, missingTargetFields } from '../services/onestockClient';
 import SortOrdersPanel from './SortOrdersPanel';
 
@@ -32,7 +32,7 @@ const StepDeliveryMetrics: React.FC = () => {
     setError(null);
     try {
       setLoading('Reading GET /metrics…');
-      setMetrics(await fetchMetrics());
+      setMetrics(await fetchMetrics(versionNumber));
       if (!config || config.site !== target.siteId) await loadDeliveryConfig(setLoading);
     } catch (err: any) { setError(err?.message || String(err)); } finally { setLoading(null); }
   };
@@ -54,7 +54,7 @@ const StepDeliveryMetrics: React.FC = () => {
     setResult(null);
     try {
       await action();
-      const next = await fetchMetrics();
+      const next = await fetchMetrics(versionNumber);
       setMetrics(next);
       // unit is not a documented field: check that the API kept it.
       const lost = (units || []).filter(x => String(next.find(m => m.id === x.id)?.unit ?? '') !== x.unit);
@@ -92,7 +92,7 @@ const StepDeliveryMetrics: React.FC = () => {
     for (const id of ids) {
       try { await deleteMetric(id, versionNumber); } catch (err: any) { failed.push(`${id}: ${err?.message || err}`); }
     }
-    try { setMetrics(await fetchMetrics()); } catch { /* list kept */ }
+    try { setMetrics(await fetchMetrics(versionNumber)); } catch { /* list kept */ }
     setSelected(new Set());
     setResult({ ok: failed.length === 0, message: `${ids.length - failed.length} deleted${failed.length ? ` · ${failed.length} failed — ${failed.join(' · ')}` : ''}`, at: 'table' });
     setBusy(false);
@@ -121,6 +121,12 @@ const StepDeliveryMetrics: React.FC = () => {
       </div>
       {missing && <p className="text-sm text-amber-700">Missing in API Settings: {missing}</p>}
       {error && <p className="p-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg break-words">{error}</p>}
+      {(error || metrics?.length === 0) && lastListAnswers['/metrics'] && (
+        <details open className="text-xs text-gray-600">
+          <summary className="cursor-pointer font-bold">Raw answers of GET /metrics ({lastListAnswers['/metrics'].length} attempt(s))</summary>
+          <pre className="mt-2 max-h-80 overflow-auto bg-gray-900 text-gray-100 p-3 rounded text-[11px]">{JSON.stringify(lastListAnswers['/metrics'], null, 2)}</pre>
+        </details>
+      )}
 
       {metrics && (
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">

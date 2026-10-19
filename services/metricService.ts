@@ -48,21 +48,45 @@ const listIn = (body: any, key: string): any[] => {
 
 // Every entity of a DTC list (GET /metrics, /sort_orders); when the list only carries the ids, each one is read
 // with GET /{entity}/{id}.
-const fetchAll = async <T extends { id: string }>(path: string, key: string, one: string): Promise<T[]> => {
-  const list = listIn(await call('GET', path, {}), key).filter(m => m && (m.id || typeof m === 'string'))
+// Last raw answers of the list reads (shown when nothing could be read from them).
+export const lastListAnswers: Record<string, { request: unknown; status: number | null; body: unknown }[]> = {};
+
+// GET with the fields first (DTC lists may only return the ids without them), then without (fields refused).
+const getWithFields = async (path: string, fields: string[], version?: number) => {
+  const attempts: Record<string, unknown>[] = [{ fields }, { filter: { fields } }, {}].map(b => (version ? { ...b, version } : b));
+  const trace: { request: unknown; status: number | null; body: unknown }[] = [];
+  let lastError: any = null;
+  for (const body of attempts) {
+    const { envelope } = await onestockRequest({ method: 'GET', path, body });
+    trace.push({ request: body, status: envelope.status, body: envelope.body });
+    if (envelope.ok) { lastListAnswers[path] = trace; return envelope.status === 204 ? null : envelope.body; }
+    lastError = Object.assign(new Error(`GET ${path}: ${describeCallError(envelope)}`), { status: envelope.status });
+    // Only a refused request (400 / 422) is worth another form.
+    if (envelope.status !== 400 && envelope.status !== 422) break;
+  }
+  lastListAnswers[path] = trace;
+  throw lastError;
+};
+
+// Every entity of a DTC list (GET /metrics, /sort_orders); when the list only carries the ids, each one is read
+// with GET /{entity}/{id}.
+const fetchAll = async <T extends { id: string }>(path: string, key: string, one: string, fields: string[], version?: number): Promise<T[]> => {
+  const list = listIn(await getWithFields(path, fields, version), key).filter(m => m && (m.id || typeof m === 'string'))
     .map(m => (typeof m === 'string' ? { id: m } : { ...m, id: String(m.id) }));
   const out: T[] = [];
   for (const m of list) {
     if (Object.keys(m).length > 1 || out.length >= 100) { out.push(m); continue; }
     try {
-      const body: any = await call('GET', `${path}/${encodeURIComponent(m.id)}`, {});
+      const body: any = await getWithFields(`${path}/${encodeURIComponent(m.id)}`, fields, version);
       out.push({ ...(body?.[one] || body || {}), id: m.id });
     } catch { out.push(m); }
   }
   return out;
 };
 
-export const fetchMetrics = () => fetchAll<Metric>('/metrics', 'metrics', 'metric');
+export const METRIC_FIELDS = ['name', 'operator'];
+export const SORT_ORDER_FIELDS = ['sales_channel', 'delivery_method', 'sort_orders', 'sort_criterias'];
+export const fetchMetrics = (version?: number) => fetchAll<Metric>('/metrics', 'metrics', 'metric', METRIC_FIELDS, version);
 
 // POST /metrics or PATCH /metrics/{id} {metric: {id, name, operator}}; version: Delivery Promise version (current if empty).
 // Documented fields: name, operator; unit sent when filled (checked after reload).
@@ -70,7 +94,7 @@ export const saveMetric = (m: { id: string; name: string; operator: string; unit
   save('/metrics', 'metric', { id: m.id, name: m.name.trim() || m.id, operator: m.operator, ...(m.unit?.trim() ? { unit: m.unit.trim() } : {}) }, update, version);
 export const metricUnit = (m: Metric) => (m.unit ? String(m.unit) : '');
 // Raw answer of GET /metrics/{id}.
-export const readMetric = (id: string, version?: number) => call('GET', `/metrics/${encodeURIComponent(id)}`, version ? { version } : {});
+export const readMetric = (id: string, version?: number) => getWithFields(`/metrics/${encodeURIComponent(id)}`, METRIC_FIELDS, version);
 export const METRIC_UNITS = ['EUR', 'USD', 'GBP', 'gCO2', 'kgCO2', 'kg', 'h', '%'];
 // 409 when the metric is still referenced.
 export const deleteMetric = (id: string, version?: number) => call('DELETE', `/metrics/${encodeURIComponent(id)}`, version ? { version } : {});
@@ -117,7 +141,7 @@ export const SORT_PRESETS = ['fastest', 'cheapest', 'greenest'];
 export const METRIC_FIELD_PREFIX = 'delivery_route.metric_value.';
 export const sortFields = (metrics: Metric[]) => ['eta_start', 'eta_end', ...metrics.map(m => `${METRIC_FIELD_PREFIX}${m.id}`)];
 
-export const fetchSortOrders = () => fetchAll<SortOrder>('/sort_orders', 'sort_orders', 'sort_order');
+export const fetchSortOrders = (version?: number) => fetchAll<SortOrder>('/sort_orders', 'sort_orders', 'sort_order', SORT_ORDER_FIELDS, version);
 export const saveSortOrder = (so: SortOrder, update: boolean, version?: number) => save('/sort_orders', 'sort_order', so, update, version);
 export const deleteSortOrder = (id: string, version?: number) => call('DELETE', `/sort_orders/${encodeURIComponent(id)}`, version ? { version } : {});
 
