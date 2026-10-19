@@ -147,7 +147,7 @@ const StepDeliveryRoutes: React.FC = () => {
                     const found = ids.filter(id => config.timetables?.[id]).length;
                     return (
                       <div className="flex flex-wrap items-center gap-3 mb-2">
-                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Route timetables (GET /timetables)</p>
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Route timetables (GET /timetable_versions)</p>
                         <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${found === ids.length ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{found} / {ids.length} read</span>
                         <button onClick={readTimetables} disabled={ttLoading} className="text-[11px] font-bold text-[#002D72] underline disabled:opacity-40">{ttLoading ? 'Reading…' : 'Read the timetables again'}</button>
                         {found < ids.length && <span className="text-[10px] text-gray-400">missing: {ids.filter(id => !config.timetables?.[id]).slice(0, 8).join(', ')} — see API Logs for the calls</span>}
@@ -207,7 +207,7 @@ const StepDeliveryRoutes: React.FC = () => {
                             {rep.status !== 'not-set' && rep.status !== 'not-found' && <TimetableWeek report={rep} width={250} />}
                             <p className="text-[10px] text-gray-500">{rep.summary}</p>
                             {route[k.key] && config.timetables?.[route[k.key]!] && (
-                              <details><summary className="text-[10px] text-gray-400 cursor-pointer">timetable JSON</summary>
+                              <details><summary className="text-[10px] text-gray-400 cursor-pointer">timetable JSON ({config.timetables[route[k.key]!].source || '?'}{config.timetables[route[k.key]!].versionsCount ? `, ${config.timetables[route[k.key]!].versionsCount} version(s)` : ''})</summary>
                                 <pre className="max-h-48 overflow-auto bg-gray-900 text-gray-100 p-2 rounded text-[10px]">{JSON.stringify(config.timetables[route[k.key]!], null, 2)}</pre></details>
                             )}
                             {rep.exceptions.length > 0 && (

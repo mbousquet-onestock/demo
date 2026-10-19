@@ -85,6 +85,9 @@ export interface Timetable {
   type?: string;
   description?: string;
   hours?: { timezone?: string; timespans?: { start?: number; end?: number; options?: Record<string, boolean> }[] };
+  // Read from /timetable_versions (current version) or /timetables.
+  source?: string;
+  versionsCount?: number;
 }
 
 // Time of an operation (pick_pack…) and its timetable (GET /execution_times).
@@ -375,30 +378,76 @@ export const routeTimetableIds = (routes: DeliveryRoute[]) =>
   [...new Set(routes.flatMap(r => TIMETABLE_KINDS.map(k => r[k.key])).filter(Boolean) as string[])];
 
 // Route / execution time timetables: GET /timetables (filters.ids), then the whole list, then GET /timetables/{id}.
+// ---- Timetables of the routes / execution times: GET /timetable_versions (current version of each timetable),
+// then GET /timetables as a fallback.
+const toSeconds = (v: any): number | null => {
+  if (v === null || v === undefined || v === '') return null;
+  if (typeof v === 'number') return v > 1e12 ? v / 1000 : v;
+  const t = Date.parse(String(v));
+  return isNaN(t) ? null : t / 1000;
+};
+// Version in force: flagged active / current, else the one whose validity period covers now, else the latest.
+const currentVersion = (versions: any[]): any => {
+  if (versions.length <= 1) return versions[0];
+  const flagged = versions.find(v => v?.active === true || v?.current === true || v?.is_current === true || /^(active|current|published|live)$/i.test(String(v?.status || '')));
+  if (flagged) return flagged;
+  const now = Date.now() / 1000;
+  const covering = versions.filter(v => {
+    const from = toSeconds(v?.from ?? v?.start_date ?? v?.valid_from ?? v?.start);
+    const to = toSeconds(v?.to ?? v?.end_date ?? v?.valid_to ?? v?.end);
+    return (from === null || from <= now) && (to === null || to >= now) && (from !== null || to !== null);
+  });
+  const pool = covering.length ? covering : versions;
+  return [...pool].sort((x, y) => (Number(y?.version ?? y?.version_number ?? 0) - Number(x?.version ?? x?.version_number ?? 0))
+    || String(y?.updated_at ?? y?.created_at ?? '').localeCompare(String(x?.updated_at ?? x?.created_at ?? '')))[0];
+};
+// Timetable id of a version entry (versions may carry the timetable id apart from their own id).
+const versionTimetableId = (v: any): string => String(v?.timetable_id ?? v?.timetable?.id ?? v?.id ?? '');
+const fromVersion = (id: string, v: any, count: number): Timetable => {
+  const inner = v?.timetable && typeof v.timetable === 'object' ? { ...v.timetable, ...v } : v;
+  return { ...inner, id, versionsCount: count, source: '/timetable_versions' } as Timetable;
+};
+
 export const fetchTimetables = async (ids: string[]): Promise<Record<string, Timetable>> => {
   const out: Record<string, Timetable> = {};
   if (ids.length === 0) return out;
+  const keep = (id: string, versions: any[]) => {
+    const v = currentVersion(versions.filter(Boolean));
+    if (v && (!out[id] || rawSpans(v).length > 0)) out[id] = fromVersion(id, v, versions.length);
+  };
+  // 1. Versions of the listed timetables.
   for (let i = 0; i < ids.length; i += 100) {
     try {
-      const body = await get('/timetables', { filters: { ids: ids.slice(i, i + 100) } });
-      arrayIn(body, ['timetables']).forEach((t: any) => { if (t && t.id) out[String(t.id)] = t; });
-    } catch { /* fallback below */ }
-  }
-  // Some sites ignore filters.ids: read the whole list once and keep the ones needed.
-  if (ids.some(x => !out[x])) {
-    try {
-      arrayIn(await get('/timetables', {}), ['timetables']).forEach((t: any) => {
-        if (t && t.id && ids.includes(String(t.id)) && !out[String(t.id)]) out[String(t.id)] = t;
-      });
+      const list = arrayIn(await get('/timetable_versions', { filters: { ids: ids.slice(i, i + 100) } }), ['timetable_versions', 'versions', 'timetables']);
+      const byId = new Map<string, any[]>();
+      list.forEach((v: any) => { const id = versionTimetableId(v); if (ids.includes(id)) byId.set(id, [...(byId.get(id) || []), v]); });
+      byId.forEach((versions, id) => keep(id, versions));
     } catch { /* per id below */ }
   }
-  // Lists may return the timetables without their hours: read those ones in detail.
+  // 2. Versions of one timetable (GET /timetable_versions/{id}).
   for (const id of ids.filter(x => !out[x] || rawSpans(out[x]).length === 0)) {
     try {
-      const body: any = await get(`/timetables/${encodeURIComponent(id)}`, {});
-      const t = body?.timetable || (Array.isArray(body?.timetables) ? body.timetables.find((x: any) => String(x?.id) === id) : null) || body;
-      if (t && typeof t === 'object' && (!out[id] || rawSpans(t).length > 0)) out[id] = { id, ...t };
-    } catch { /* reported as not found */ }
+      const body: any = await get(`/timetable_versions/${encodeURIComponent(id)}`, {});
+      const list = arrayIn(body, ['timetable_versions', 'versions', 'timetables']);
+      keep(id, list.length ? list : body && typeof body === 'object' ? [body.timetable_version || body.version || body] : []);
+    } catch { /* fallback below */ }
+  }
+  // 3. Fallback: GET /timetables (filtered, then detail).
+  const missing = ids.filter(x => !out[x] || rawSpans(out[x]).length === 0);
+  if (missing.length) {
+    try {
+      arrayIn(await get('/timetables', { filters: { ids: missing } }), ['timetables']).forEach((t: any) => {
+        const id = String(t?.id || '');
+        if (missing.includes(id) && (!out[id] || rawSpans(t).length > 0)) out[id] = { ...t, source: '/timetables' };
+      });
+    } catch { /* detail below */ }
+    for (const id of missing.filter(x => !out[x] || rawSpans(out[x]).length === 0)) {
+      try {
+        const body: any = await get(`/timetables/${encodeURIComponent(id)}`, {});
+        const t = body?.timetable || body;
+        if (t && typeof t === 'object' && (!out[id] || rawSpans(t).length > 0)) out[id] = { id, ...t, source: '/timetables' };
+      } catch { /* reported as not found */ }
+    }
   }
   return out;
 };
