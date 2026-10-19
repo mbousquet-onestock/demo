@@ -112,7 +112,8 @@ export const normalizeTimetable = (raw: any, id?: string): Timetable => {
   if (cur) {
     t.hours = { timezone: cur.timezone, timespans: cur.timespans || [] };
     if (cur.from !== undefined) t.validFrom = toSeconds(cur.from) ?? undefined;
-    if (cur.to !== undefined) t.validTo = toSeconds(cur.to) ?? undefined;
+    // to = 0: no end.
+    if (cur.to) t.validTo = toSeconds(cur.to) ?? undefined;
   }
   const next = versionBody(raw?.next_timetable);
   if (next && Object.keys(next).length) t.next = { from: toSeconds(next.from) ?? undefined, to: toSeconds(next.to) ?? undefined, timezone: next.timezone, timespans: next.timespans || [] };
@@ -601,8 +602,8 @@ export const timetableReport = (id: string | undefined, timetables: Record<strin
     if (sp.options?.open === false && !sp.date) return;
     // Week span running over Sunday → Monday.
     if (!sp.date && end < start) end += WEEK;
-    // Time (start = end): pickup / delivery hour of carrier timetables.
-    if (end === start) {
+    // Time (start = end, or a span under one minute such as 43200 → 43201): pickup / delivery hour of carrier timetables.
+    if (end - start < 60) {
       if (sp.date) exceptions.push(new Date(start * 1000).toLocaleString());
       else { days[Math.floor(start / 86400) % 7].push({ start: start % 86400, end: start % 86400 }); times++; }
       return;
