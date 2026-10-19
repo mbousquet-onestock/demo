@@ -124,7 +124,7 @@ const SortOrdersPanel: React.FC<Props> = ({ metrics, version, disabled }) => {
 
       <div className="p-4 border-t border-gray-100 space-y-3">
         <p className="text-sm font-bold text-gray-700">
-          {editing ? `Edit ${editing}` : 'New sort order'} <span className="font-mono text-xs font-normal text-gray-400">{editing ? 'PATCH' : 'POST'} /sort_orders/{id || '{id}'}</span>
+          {editing ? `Edit ${editing}` : 'New sort order'} <span className="font-mono text-xs font-normal text-gray-400">{editing ? `PATCH /sort_orders/${editing}` : 'POST /sort_orders'}</span>
         </p>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <label className="text-xs text-gray-500">Id

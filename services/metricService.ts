@@ -20,8 +20,22 @@ export interface Metric {
 const call = async (method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: string, body: Record<string, unknown>) => {
   const { envelope } = await onestockRequest({ method, path, body });
   if (envelope.status === 204) return null;
-  if (!envelope.ok) throw new Error(`${method} ${path}: ${describeCallError(envelope)}`);
+  if (!envelope.ok) throw Object.assign(new Error(`${method} ${path}: ${describeCallError(envelope)}`), { status: envelope.status });
   return envelope.body;
+};
+
+// Creation: POST /{entity} with the id in the body (POST /{entity}/{id} answers 405), PATCH /{entity}/{id} to update.
+// POST /{entity}/{id} is tried when the collection refuses the method.
+const save = async (path: string, key: string, entity: { id: string } & Record<string, unknown>, update: boolean, version?: number) => {
+  const body = { [key]: entity, ...(version ? { version } : {}) };
+  const one = `${path}/${encodeURIComponent(entity.id)}`;
+  if (update) return call('PATCH', one, body);
+  try {
+    return await call('POST', path, body);
+  } catch (err: any) {
+    if (err?.status === 404 || err?.status === 405) return call('POST', one, body);
+    throw err;
+  }
 };
 
 const listIn = (body: any, key: string): any[] => {
@@ -50,9 +64,9 @@ const fetchAll = async <T extends { id: string }>(path: string, key: string, one
 
 export const fetchMetrics = () => fetchAll<Metric>('/metrics', 'metrics', 'metric');
 
-// POST (create) or PATCH (update) /metrics/{id} {metric: {name, operator}}; version: Delivery Promise version (current if empty).
+// POST /metrics or PATCH /metrics/{id} {metric: {id, name, operator}}; version: Delivery Promise version (current if empty).
 export const saveMetric = (m: { id: string; name: string; operator: string }, update: boolean, version?: number) =>
-  call(update ? 'PATCH' : 'POST', `/metrics/${encodeURIComponent(m.id)}`, { metric: { name: m.name || m.id, operator: m.operator }, ...(version ? { version } : {}) });
+  save('/metrics', 'metric', { id: m.id, name: m.name || m.id, operator: m.operator }, update, version);
 // 409 when the metric is still referenced.
 export const deleteMetric = (id: string, version?: number) => call('DELETE', `/metrics/${encodeURIComponent(id)}`, version ? { version } : {});
 
@@ -99,8 +113,7 @@ export const METRIC_FIELD_PREFIX = 'delivery_route.metric_value.';
 export const sortFields = (metrics: Metric[]) => ['eta_start', 'eta_end', ...metrics.map(m => `${METRIC_FIELD_PREFIX}${m.id}`)];
 
 export const fetchSortOrders = () => fetchAll<SortOrder>('/sort_orders', 'sort_orders', 'sort_order');
-export const saveSortOrder = (so: SortOrder, update: boolean, version?: number) =>
-  call(update ? 'PATCH' : 'POST', `/sort_orders/${encodeURIComponent(so.id)}`, { sort_order: so, ...(version ? { version } : {}) });
+export const saveSortOrder = (so: SortOrder, update: boolean, version?: number) => save('/sort_orders', 'sort_order', so, update, version);
 export const deleteSortOrder = (id: string, version?: number) => call('DELETE', `/sort_orders/${encodeURIComponent(id)}`, version ? { version } : {});
 
 // Criteria on a metric that is not defined in /metrics.

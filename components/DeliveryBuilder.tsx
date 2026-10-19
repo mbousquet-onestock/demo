@@ -162,7 +162,7 @@ const DeliveryBuilder: React.FC<{ config: DeliveryConfig | null; onDone?: () => 
                     <button onClick={() => runAll(op.id)} disabled={!!running || !!missing} className="px-2 py-1 text-[11px] font-bold text-white bg-emerald-600 rounded disabled:opacity-40">{running === op.id ? '…' : 'Run'}</button>
                     <button onClick={() => setOps(prev => prev.filter(o => o.id !== op.id))} className="px-1.5 text-gray-400 hover:text-red-600" title="Remove">✕</button>
                   </div>
-                  <p className="text-gray-500 font-mono text-[11px]">POST {OPERATION_KINDS[op.kind].path}{'withId' in OPERATION_KINDS[op.kind] ? `/${op.body?.id || '{id}'}` : ''} · {operationSummary(op)}</p>
+                  <p className="text-gray-500 font-mono text-[11px]">POST {OPERATION_KINDS[op.kind].path} · {operationSummary(op)}</p>
                   {issues.map(i => <p key={i} className="text-amber-700">⚠ {i}</p>)}
                   {op.result && !op.result.ok && <p className="text-red-600 break-words">{op.result.message}{op.result.requestId ? ` · Request-Id ${op.result.requestId}` : ''}</p>}
                   {isEditing && (

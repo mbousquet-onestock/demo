@@ -6,9 +6,8 @@ import { DeliveryConfig } from './deliveryRouteService';
 // Creation APIs of the Delivery Promise configuration, in execution order.
 export const OPERATION_KINDS = {
   timetable: { path: '/timetables', key: 'timetable', label: 'Carrier timetable', order: 0 },
-  // Delivery Time Calculator entities: POST /{entity}/{id}.
-  zone: { path: '/zones', key: 'zone', label: 'Zone', order: 1, withId: true },
-  delivery_route: { path: '/delivery_routes', key: 'delivery_route', label: 'Delivery route', order: 2, withId: true },
+  zone: { path: '/zones', key: 'zone', label: 'Zone', order: 1 },
+  delivery_route: { path: '/delivery_routes', key: 'delivery_route', label: 'Delivery route', order: 2 },
 } as const;
 export type OperationKind = keyof typeof OPERATION_KINDS;
 
@@ -89,8 +88,11 @@ export const runOperation = async (op: DeliveryScriptOperation): Promise<NonNull
   const meta = OPERATION_KINDS[op.kind];
   const at = new Date().toISOString();
   try {
-    const path = 'withId' in meta && op.body?.id ? `${meta.path}/${encodeURIComponent(op.body.id)}` : meta.path;
-    const { envelope } = await onestockRequest({ method: 'POST', path, body: { [meta.key]: op.body } });
+    let { envelope } = await onestockRequest({ method: 'POST', path: meta.path, body: { [meta.key]: op.body } });
+    // Some entities are only created with POST /{entity}/{id}.
+    if ((envelope.status === 404 || envelope.status === 405) && op.body?.id) {
+      ({ envelope } = await onestockRequest({ method: 'POST', path: `${meta.path}/${encodeURIComponent(op.body.id)}`, body: { [meta.key]: op.body } }));
+    }
     return { ok: envelope.ok, status: envelope.status, message: envelope.ok ? `Created (HTTP ${envelope.status})` : describeCallError(envelope), at, requestId: envelope.headers?.['request-id'] };
   } catch (err: any) {
     return { ok: false, status: null, message: err?.message || String(err), at };

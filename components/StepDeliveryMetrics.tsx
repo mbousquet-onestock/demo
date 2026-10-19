@@ -135,7 +135,7 @@ const StepDeliveryMetrics: React.FC = () => {
         <div>
           <p className="font-bold text-gray-800">{editing ? `Edit the metric ${editing}` : 'Create a metric'}</p>
           <p className="text-xs text-gray-500">
-            <span className="font-mono">{editing ? 'PATCH' : 'POST'} /metrics/{form.id.trim() || '{id}'}</span> · the routes give a value per metric (<span className="font-mono">metric_values</span>),
+            <span className="font-mono">{editing ? `PATCH /metrics/${editing}` : 'POST /metrics'}</span> · the routes give a value per metric (<span className="font-mono">metric_values</span>),
             the operator says how the delivery promise combines the values of its routes.
           </p>
         </div>
