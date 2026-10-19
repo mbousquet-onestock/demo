@@ -27,7 +27,9 @@ const call = async (method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: string, b
 // Creation: POST /{entity} with the id in the body (POST /{entity}/{id} answers 405), PATCH /{entity}/{id} to update.
 // POST /{entity}/{id} is tried when the collection refuses the method.
 const save = async (path: string, key: string, entity: { id: string } & Record<string, unknown>, update: boolean, version?: number) => {
-  const body = { [key]: entity, ...(version ? { version } : {}) };
+  // Metrics carry their name only (no id field).
+  const { id: _id, ...rest } = entity;
+  const body = { [key]: key === 'metric' ? rest : entity, ...(version ? { version } : {}) };
   const one = `${path}/${encodeURIComponent(entity.id)}`;
   if (update) return call('PATCH', one, body);
   try {
@@ -71,8 +73,9 @@ const getWithFields = async (path: string, fields: string[], version?: number) =
 // Every entity of a DTC list (GET /metrics, /sort_orders); when the list only carries the ids, each one is read
 // with GET /{entity}/{id}.
 const fetchAll = async <T extends { id: string }>(path: string, key: string, one: string, fields: string[], version?: number): Promise<T[]> => {
-  const list = listIn(await getWithFields(path, fields, version), key).filter(m => m && (m.id || typeof m === 'string'))
-    .map(m => (typeof m === 'string' ? { id: m } : { ...m, id: String(m.id) }));
+  // Metrics have no id: their name is the key (GET /metrics → [{name, operator, version}]).
+  const list = listIn(await getWithFields(path, fields, version), key).filter(m => m && (m.id || m.name || typeof m === 'string'))
+    .map(m => (typeof m === 'string' ? { id: m } : { ...m, id: String(m.id ?? m.name) }));
   const out: T[] = [];
   for (const m of list) {
     if (Object.keys(m).length > 1 || out.length >= 100) { out.push(m); continue; }
@@ -90,8 +93,9 @@ export const fetchMetrics = (version?: number) => fetchAll<Metric>('/metrics', '
 
 // POST /metrics or PATCH /metrics/{id} {metric: {id, name, operator}}; version: Delivery Promise version (current if empty).
 // Documented fields: name, operator; unit sent when filled (checked after reload).
-export const saveMetric = (m: { id: string; name: string; operator: string; unit?: string }, update: boolean, version?: number) =>
-  save('/metrics', 'metric', { id: m.id, name: m.name.trim() || m.id, operator: m.operator, ...(m.unit?.trim() ? { unit: m.unit.trim() } : {}) }, update, version);
+// The name is the metric key (the key of the routes' metric_values): POST /metrics, PATCH / DELETE /metrics/{name}.
+export const saveMetric = (m: { id: string; operator: string; unit?: string }, update: boolean, version?: number) =>
+  save('/metrics', 'metric', { id: m.id, name: m.id, operator: m.operator, ...(m.unit?.trim() ? { unit: m.unit.trim() } : {}) }, update, version);
 export const metricUnit = (m: Metric) => (m.unit ? String(m.unit) : '');
 // Raw answer of GET /metrics/{id}.
 export const readMetric = (id: string, version?: number) => getWithFields(`/metrics/${encodeURIComponent(id)}`, METRIC_FIELDS, version);

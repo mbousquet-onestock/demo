@@ -4,8 +4,8 @@ import { Metric, METRIC_OPERATORS, METRIC_UNITS, fetchMetrics, saveMetric, delet
 import { useApiTarget, missingTargetFields } from '../services/onestockClient';
 import SortOrdersPanel from './SortOrdersPanel';
 
-const EMPTY = { id: '', name: '', operator: 'sum', unit: '' };
-type Draft = { name: string; operator: string; unit: string };
+const EMPTY = { id: '', operator: 'sum', unit: '' };
+type Draft = { operator: string; unit: string };
 const SUGGESTIONS = ['cost_by_parcel', 'carbon_footprint'];
 
 // Delivery Routes → Metrics: metrics of the site (GET /metrics), their use in the routes (metric_values), creation.
@@ -18,7 +18,7 @@ const StepDeliveryMetrics: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY);
-  // Changes typed in the table (name, unit, operator), saved per row with PATCH /metrics/{id}.
+  // Changes typed in the table (unit, operator), saved per row with PATCH /metrics/{id}.
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   // Selection for the bulk deletion, raw GET /metrics/{id} answers.
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -46,7 +46,7 @@ const StepDeliveryMetrics: React.FC = () => {
   const routesWithout = (config?.routes || []).filter(r => !Object.keys(r.metric_values || {}).length);
 
   const exists = !!metrics?.some(m => m.id === form.id.trim());
-  const formError = !form.id.trim() ? 'Id required' : /\s/.test(form.id.trim()) ? 'No space in the id' : exists ? 'This id already exists: change it in the table' : '';
+  const formError = !form.id.trim() ? 'Name required' : /\s/.test(form.id.trim()) ? 'No space in the name' : exists ? 'This metric already exists: change it in the table' : '';
   const versionNumber = Number(version) || undefined;
 
   const run = async (action: () => Promise<unknown>, done: string, at: 'table' | 'form' = 'table', units?: { id: string; unit: string }[]) => {
@@ -69,7 +69,7 @@ const StepDeliveryMetrics: React.FC = () => {
     const unit = form.unit.trim();
     if (await run(() => saveMetric({ ...form, id }, false, versionNumber), `Created: ${id}`, 'form', unit ? [{ id, unit }] : undefined)) setForm(EMPTY);
   };
-  const stored = (m: Metric): Draft => ({ name: String(m.name ?? ''), operator: String(m.operator || ''), unit: String(m.unit ?? '') });
+  const stored = (m: Metric): Draft => ({ operator: String(m.operator || ''), unit: String(m.unit ?? '') });
   const draftOf = (m: Metric) => drafts[m.id] || stored(m);
   const changed = (m: Metric) => !!drafts[m.id] && JSON.stringify(drafts[m.id]) !== JSON.stringify(stored(m));
   const setDraft = (m: Metric, d: Partial<Draft>) => setDrafts({ ...drafts, [m.id]: { ...draftOf(m), ...d } });
@@ -132,7 +132,7 @@ const StepDeliveryMetrics: React.FC = () => {
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-[10px] uppercase tracking-wider text-gray-400">
-              <tr><th className="pl-4 py-2 w-6"><input type="checkbox" checked={metrics.length > 0 && selected.size === metrics.length} onChange={e => setSelected(e.target.checked ? new Set(metrics.map(m => m.id)) : new Set())} /></th><th className="px-4 py-2 text-left">Metric</th><th className="px-4 py-2 text-left">Name</th><th className="px-4 py-2 text-left">Unit</th><th className="px-4 py-2 text-left">Operator</th><th className="px-4 py-2 text-left">Routes</th><th className="px-4 py-2 text-left">Values</th><th /></tr>
+              <tr><th className="pl-4 py-2 w-6"><input type="checkbox" checked={metrics.length > 0 && selected.size === metrics.length} onChange={e => setSelected(e.target.checked ? new Set(metrics.map(m => m.id)) : new Set())} /></th><th className="px-4 py-2 text-left">Metric (name)</th><th className="px-4 py-2 text-left">Version</th><th className="px-4 py-2 text-left">Unit</th><th className="px-4 py-2 text-left">Operator</th><th className="px-4 py-2 text-left">Routes</th><th className="px-4 py-2 text-left">Values</th><th /></tr>
             </thead>
             <tbody>
               {metrics.length === 0 && <tr><td colSpan={8} className="px-4 py-6 text-center text-gray-400">No metric on this site.</td></tr>}
@@ -144,9 +144,7 @@ const StepDeliveryMetrics: React.FC = () => {
                     <tr className="border-t border-gray-100 hover:bg-gray-50 cursor-pointer" onClick={() => setOpen(open === m.id ? null : m.id)}>
                       <td className="pl-4 py-2.5" onClick={e => e.stopPropagation()}><input type="checkbox" checked={selected.has(m.id)} onChange={() => toggle(m.id)} /></td>
                       <td className="px-4 py-2.5 font-mono text-xs font-bold text-gray-800">{m.id}</td>
-                      <td className="px-4 py-2" onClick={e => e.stopPropagation()}>
-                        <input value={draftOf(m).name} onChange={e => setDraft(m, { name: e.target.value })} placeholder={m.id} className={`w-40 px-2 py-1 text-sm border rounded-lg ${changed(m) ? 'border-amber-400 bg-amber-50' : 'border-gray-200'}`} />
-                      </td>
+                      <td className="px-4 py-2.5 text-xs text-gray-500">{m.version !== undefined ? String(m.version) : '—'}</td>
                       <td className="px-4 py-2" onClick={e => e.stopPropagation()}>
                         <input value={draftOf(m).unit} onChange={e => setDraft(m, { unit: e.target.value })} list="metric-units" placeholder="EUR" className={`w-24 px-2 py-1 text-sm border rounded-lg ${changed(m) ? 'border-amber-400 bg-amber-50' : 'border-gray-200'}`} />
                       </td>
@@ -211,7 +209,7 @@ const StepDeliveryMetrics: React.FC = () => {
         <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800 space-y-1">
           {unknownKeys.map(k => (
             <p key={k}>Key <span className="font-mono">{k}</span> used by {usages.get(k)!.routes.length} route(s) but not defined in /metrics (no operator to combine it).{' '}
-              <button onClick={() => setForm({ id: k, name: k, operator: 'sum', unit: '' })} className="font-bold underline">Create it</button></p>
+              <button onClick={() => setForm({ id: k, operator: 'sum', unit: '' })} className="font-bold underline">Create it</button></p>
           ))}
           {routesWithout.length > 0 && <p>{routesWithout.length} route(s) without metric_values: {routesWithout.slice(0, 10).map(r => r.id).join(', ')}{routesWithout.length > 10 ? '…' : ''}</p>}
         </div>
@@ -225,13 +223,10 @@ const StepDeliveryMetrics: React.FC = () => {
             the operator says how the delivery promise combines the values of its routes. The unit is not a documented field: it is sent when filled and checked after saving.
           </p>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-          <label className="text-xs text-gray-500">Id (key of metric_values)
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <label className="text-xs text-gray-500">Name (key of metric_values)
             <input value={form.id} onChange={e => setForm({ ...form, id: e.target.value })} list="metric-suggestions" placeholder="cost_by_parcel" className="mt-1 w-full px-3 py-2 text-sm font-mono border border-gray-200 rounded-lg disabled:bg-gray-50" />
             <datalist id="metric-suggestions">{[...new Set([...SUGGESTIONS, ...unknownKeys])].map(k => <option key={k} value={k} />)}</datalist>
-          </label>
-          <label className="text-xs text-gray-500">Name
-            <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder={form.id || 'same as the id'} className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg" />
           </label>
           <label className="text-xs text-gray-500">Unit <span className="text-gray-400">(optional)</span>
             <input value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })} list="metric-units" placeholder="EUR" className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg" />
