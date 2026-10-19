@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { deliveryConfigStore, loadDeliveryConfig, carrierLabel } from '../services/deliveryRouteService';
 import { Metric, METRIC_OPERATORS, METRIC_UNITS, fetchMetrics, saveMetric, deleteMetric, metricUsages, metricKey, metricUnit, readMetric, lastListAnswers } from '../services/metricService';
 import { useApiTarget, missingTargetFields } from '../services/onestockClient';
-import SortOrdersPanel from './SortOrdersPanel';
 
 const EMPTY = { id: '', operator: 'sum', unit: '' };
 type Draft = { operator: string; unit: string };
@@ -112,7 +111,7 @@ const StepDeliveryMetrics: React.FC = () => {
         <div className="flex-1 min-w-[260px]">
           <h2 className="text-2xl font-bold text-[#002D72]">Delivery metrics</h2>
           <p className="text-sm text-gray-500 mt-1">
-            Metrics of the site (<span className="font-mono">GET /metrics</span>), their values on the delivery routes (<span className="font-mono">metric_values</span>) and the sort orders using them.
+            Metrics of the site (<span className="font-mono">GET /metrics</span>), their values on the delivery routes (<span className="font-mono">metric_values</span>).
           </p>
         </div>
         <button onClick={load} disabled={!!loading || !!missing} className="px-4 py-2 text-xs font-bold text-white bg-[#002D72] rounded-lg hover:bg-[#001F4D] disabled:opacity-40">
@@ -248,8 +247,6 @@ const StepDeliveryMetrics: React.FC = () => {
           {result?.at === 'form' && <span className={`text-xs ${result.ok ? 'text-emerald-700' : 'text-red-700'} break-words`}>{result.message}</span>}
         </div>
       </div>
-
-      {metrics && <SortOrdersPanel metrics={metrics} version={versionNumber} disabled={!!missing} />}
     </div>
   );
 };

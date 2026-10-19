@@ -48,8 +48,6 @@ const listIn = (body: any, key: string): any[] => {
   return (Object.values(body).find(v => Array.isArray(v)) as any[]) || [];
 };
 
-// Every entity of a DTC list (GET /metrics, /sort_orders); when the list only carries the ids, each one is read
-// with GET /{entity}/{id}.
 // Last raw answers of the list reads (shown when nothing could be read from them).
 export const lastListAnswers: Record<string, { request: unknown; status: number | null; body: unknown }[]> = {};
 
@@ -70,7 +68,7 @@ const getWithFields = async (path: string, fields: string[], version?: number) =
   throw lastError;
 };
 
-// Every entity of a DTC list (GET /metrics, /sort_orders); when the list only carries the ids, each one is read
+// Every entity of a DTC list (GET /metrics); when the list only carries the ids, each one is read
 // with GET /{entity}/{id}.
 const fetchAll = async <T extends { id: string }>(path: string, key: string, one: string, fields: string[], version?: number): Promise<T[]> => {
   // Metrics have no id: their name is the key (GET /metrics → [{name, operator, version}]).
@@ -88,7 +86,6 @@ const fetchAll = async <T extends { id: string }>(path: string, key: string, one
 };
 
 export const METRIC_FIELDS = ['name', 'operator'];
-export const SORT_ORDER_FIELDS = ['sales_channel', 'delivery_method', 'sort_orders', 'sort_criterias'];
 export const fetchMetrics = (version?: number) => fetchAll<Metric>('/metrics', 'metrics', 'metric', METRIC_FIELDS, version);
 
 // POST /metrics or PATCH /metrics/{id} {metric: {id, name, operator}}; version: Delivery Promise version (current if empty).
@@ -130,29 +127,3 @@ export const metricUsages = (routes: DeliveryRoute[]): Map<string, MetricUsage> 
   return out;
 };
 
-// ---- Sort orders: how the delivery options of a delivery method / sales channel are sorted.
-export interface SortCriteria { field: string; desc?: boolean }
-export interface SortOrder {
-  id: string;
-  sales_channel?: string;
-  delivery_method?: string;
-  // Presets (fastest / cheapest / greenest), or detailed criteria.
-  sort_orders?: string[];
-  sort_criterias?: SortCriteria[];
-  [key: string]: unknown;
-}
-export const SORT_PRESETS = ['fastest', 'cheapest', 'greenest'];
-export const METRIC_FIELD_PREFIX = 'delivery_route.metric_value.';
-export const sortFields = (metrics: Metric[]) => ['eta_start', 'eta_end', ...metrics.map(m => `${METRIC_FIELD_PREFIX}${m.id}`)];
-
-export const fetchSortOrders = (version?: number) => fetchAll<SortOrder>('/sort_orders', 'sort_orders', 'sort_order', SORT_ORDER_FIELDS, version);
-export const saveSortOrder = (so: SortOrder, update: boolean, version?: number) => save('/sort_orders', 'sort_order', so, update, version);
-export const deleteSortOrder = (id: string, version?: number) => call('DELETE', `/sort_orders/${encodeURIComponent(id)}`, version ? { version } : {});
-
-// Criteria on a metric that is not defined in /metrics.
-export const unknownMetricFields = (so: SortOrder, metrics: Metric[]) =>
-  (so.sort_criterias || []).map(c => c.field).filter(f => f?.startsWith(METRIC_FIELD_PREFIX) && !metrics.some(m => f === METRIC_FIELD_PREFIX + m.id || f === METRIC_FIELD_PREFIX + m.name));
-export const sortOrderLabel = (so: SortOrder) => [
-  ...(so.sort_orders || []),
-  ...(so.sort_criterias || []).map(c => `${c.field.replace(METRIC_FIELD_PREFIX, 'metric ')} ${c.desc ? '↓' : '↑'}`),
-].join(' → ') || 'no criteria';
