@@ -1,10 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import { deliveryConfigStore, loadDeliveryConfig, carrierLabel } from '../services/deliveryRouteService';
-import { Metric, METRIC_OPERATORS, fetchMetrics, saveMetric, deleteMetric, metricUsages, metricKey } from '../services/metricService';
+import { Metric, METRIC_OPERATORS, METRIC_UNITS, fetchMetrics, saveMetric, deleteMetric, metricUsages, metricKey } from '../services/metricService';
 import { useApiTarget, missingTargetFields } from '../services/onestockClient';
 import SortOrdersPanel from './SortOrdersPanel';
 
-const EMPTY = { id: '', name: '', operator: 'sum' };
+const EMPTY = { id: '', name: '', operator: 'sum', unit: '' };
 const SUGGESTIONS = ['cost_by_parcel', 'carbon_footprint'];
 
 // Delivery Routes → Metrics: metrics of the site (GET /metrics), their use in the routes (metric_values), creation.
@@ -41,21 +41,27 @@ const StepDeliveryMetrics: React.FC = () => {
   const formError = !form.id.trim() ? 'Id required' : /\s/.test(form.id.trim()) ? 'No space in the id' : !editing && exists ? 'This id already exists: edit it instead' : '';
   const versionNumber = Number(version) || undefined;
 
-  const run = async (action: () => Promise<unknown>, done: string) => {
+  const run = async (action: () => Promise<unknown>, done: string, unitOf?: { id: string; unit: string }) => {
     setBusy(true);
     setResult(null);
     try {
       await action();
-      setResult({ ok: true, message: done });
-      setMetrics(await fetchMetrics());
+      const next = await fetchMetrics();
+      setMetrics(next);
+      // The unit is not documented: check that the API kept it.
+      const stored = unitOf && next.find(m => m.id === unitOf.id);
+      setResult(stored && stored.unit !== unitOf!.unit
+        ? { ok: false, message: `${done}, but the API did not keep the unit "${unitOf!.unit}" (not a field of the metric on this site)` }
+        : { ok: true, message: done });
       return true;
     } catch (err: any) { setResult({ ok: false, message: err?.message || String(err) }); return false; } finally { setBusy(false); }
   };
   const save = async () => {
     const id = form.id.trim();
-    if (await run(() => saveMetric({ ...form, id }, !!editing, versionNumber), `${editing ? 'Updated' : 'Created'}: ${id}`)) { setForm(EMPTY); setEditing(null); }
+    const unit = form.unit.trim();
+    if (await run(() => saveMetric({ ...form, id }, !!editing, versionNumber), `${editing ? 'Updated' : 'Created'}: ${id}`, unit ? { id, unit } : undefined)) { setForm(EMPTY); setEditing(null); }
   };
-  const edit = (m: Metric) => { setEditing(m.id); setForm({ id: m.id, name: String(m.name || ''), operator: String(m.operator || 'sum') }); setResult(null); };
+  const edit = (m: Metric) => { setEditing(m.id); setForm({ id: m.id, name: String(m.name || ''), operator: String(m.operator || 'sum'), unit: String(m.unit || '') }); setResult(null); };
   const remove = (m: Metric) => {
     const used = usages.get(metricKey(m, usages))?.routes.length;
     if (!window.confirm(`Delete the metric ${m.id}?${used ? `\nIt is used by ${used} route(s) (the API refuses with 409 while it is referenced).` : ''}`)) return;
@@ -96,7 +102,7 @@ const StepDeliveryMetrics: React.FC = () => {
                       <td className="px-4 py-2.5">{m.operator ? <span className="font-mono text-xs px-1.5 py-0.5 rounded bg-blue-50 text-[#002D72]">{String(m.operator)}</span> : <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">no operator</span>}</td>
                       <td className="px-4 py-2.5 text-gray-600">{u ? `${u.routes.length} route(s)` : <span className="text-gray-300">not used</span>}</td>
                       <td className="px-4 py-2.5 text-gray-600">
-                        {u && (u.min !== undefined ? (u.min === u.max ? u.min : `${u.min} – ${u.max}`) : '—')}
+                        {u && (u.min !== undefined ? `${u.min === u.max ? u.min : `${u.min} – ${u.max}`}${m.unit ? ` ${m.unit}` : ''}` : '—')}
                         {u && u.nulls > 0 && <span className="ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700">{u.nulls} null</span>}
                       </td>
                       <td className="px-4 py-2.5 text-right whitespace-nowrap">
@@ -125,7 +131,7 @@ const StepDeliveryMetrics: React.FC = () => {
         <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800 space-y-1">
           {unknownKeys.map(k => (
             <p key={k}>Key <span className="font-mono">{k}</span> used by {usages.get(k)!.routes.length} route(s) but not defined in /metrics (no operator to combine it).{' '}
-              <button onClick={() => { setEditing(null); setForm({ id: k, name: k, operator: 'sum' }); }} className="font-bold underline">Create it</button></p>
+              <button onClick={() => { setEditing(null); setForm({ id: k, name: k, operator: 'sum', unit: '' }); }} className="font-bold underline">Create it</button></p>
           ))}
           {routesWithout.length > 0 && <p>{routesWithout.length} route(s) without metric_values: {routesWithout.slice(0, 10).map(r => r.id).join(', ')}{routesWithout.length > 10 ? '…' : ''}</p>}
         </div>
@@ -139,7 +145,7 @@ const StepDeliveryMetrics: React.FC = () => {
             the operator says how the delivery promise combines the values of its routes.
           </p>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
           <label className="text-xs text-gray-500">Id (key of metric_values)
             <input value={form.id} onChange={e => setForm({ ...form, id: e.target.value })} disabled={!!editing} list="metric-suggestions" placeholder="cost_by_parcel" className="mt-1 w-full px-3 py-2 text-sm font-mono border border-gray-200 rounded-lg disabled:bg-gray-50" />
             <datalist id="metric-suggestions">{[...new Set([...SUGGESTIONS, ...unknownKeys])].map(k => <option key={k} value={k} />)}</datalist>
@@ -151,6 +157,10 @@ const StepDeliveryMetrics: React.FC = () => {
             <select value={form.operator} onChange={e => setForm({ ...form, operator: e.target.value })} className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white">
               {METRIC_OPERATORS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
             </select>
+          </label>
+          <label className="text-xs text-gray-500">Unit <span className="text-gray-400">(optional)</span>
+            <input value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })} list="metric-units" placeholder="EUR" className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg" />
+            <datalist id="metric-units">{METRIC_UNITS.map(u => <option key={u} value={u} />)}</datalist>
           </label>
           <label className="text-xs text-gray-500">Delivery Promise version
             <input value={version} onChange={e => setVersion(e.target.value.replace(/\D/g, ''))} placeholder="current" className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 rounded-lg" />
