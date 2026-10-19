@@ -24,28 +24,31 @@ const call = async (method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: string, b
   return envelope.body;
 };
 
-const listIn = (body: any): any[] => {
+const listIn = (body: any, key: string): any[] => {
   if (Array.isArray(body)) return body;
   if (!body || typeof body !== 'object') return [];
-  if (Array.isArray(body.metrics)) return body.metrics;
-  if (body.metrics && typeof body.metrics === 'object') return Object.entries(body.metrics).map(([id, x]) => ({ id, ...(x as object) }));
+  if (Array.isArray(body[key])) return body[key];
+  if (body[key] && typeof body[key] === 'object') return Object.entries(body[key]).map(([id, x]) => ({ id, ...(x as object) }));
   return (Object.values(body).find(v => Array.isArray(v)) as any[]) || [];
 };
 
-// Every metric of the site; when the list only carries the ids, each one is read with GET /metrics/{id}.
-export const fetchMetrics = async (): Promise<Metric[]> => {
-  const list = listIn(await call('GET', '/metrics', {})).filter(m => m && (m.id || typeof m === 'string'))
+// Every entity of a DTC list (GET /metrics, /sort_orders); when the list only carries the ids, each one is read
+// with GET /{entity}/{id}.
+const fetchAll = async <T extends { id: string }>(path: string, key: string, one: string): Promise<T[]> => {
+  const list = listIn(await call('GET', path, {}), key).filter(m => m && (m.id || typeof m === 'string'))
     .map(m => (typeof m === 'string' ? { id: m } : { ...m, id: String(m.id) }));
-  const out: Metric[] = [];
+  const out: T[] = [];
   for (const m of list) {
     if (Object.keys(m).length > 1 || out.length >= 100) { out.push(m); continue; }
     try {
-      const body: any = await call('GET', `/metrics/${encodeURIComponent(m.id)}`, {});
-      out.push({ ...(body?.metric || body || {}), id: m.id });
+      const body: any = await call('GET', `${path}/${encodeURIComponent(m.id)}`, {});
+      out.push({ ...(body?.[one] || body || {}), id: m.id });
     } catch { out.push(m); }
   }
   return out;
 };
+
+export const fetchMetrics = () => fetchAll<Metric>('/metrics', 'metrics', 'metric');
 
 // POST (create) or PATCH (update) /metrics/{id} {metric: {name, operator}}; version: Delivery Promise version (current if empty).
 export const saveMetric = (m: { id: string; name: string; operator: string }, update: boolean, version?: number) =>
@@ -79,3 +82,31 @@ export const metricUsages = (routes: DeliveryRoute[]): Map<string, MetricUsage> 
   }));
   return out;
 };
+
+// ---- Sort orders: how the delivery options of a delivery method / sales channel are sorted.
+export interface SortCriteria { field: string; desc?: boolean }
+export interface SortOrder {
+  id: string;
+  sales_channel?: string;
+  delivery_method?: string;
+  // Presets (fastest / cheapest / greenest), or detailed criteria.
+  sort_orders?: string[];
+  sort_criterias?: SortCriteria[];
+  [key: string]: unknown;
+}
+export const SORT_PRESETS = ['fastest', 'cheapest', 'greenest'];
+export const METRIC_FIELD_PREFIX = 'delivery_route.metric_value.';
+export const sortFields = (metrics: Metric[]) => ['eta_start', 'eta_end', ...metrics.map(m => `${METRIC_FIELD_PREFIX}${m.id}`)];
+
+export const fetchSortOrders = () => fetchAll<SortOrder>('/sort_orders', 'sort_orders', 'sort_order');
+export const saveSortOrder = (so: SortOrder, update: boolean, version?: number) =>
+  call(update ? 'PATCH' : 'POST', `/sort_orders/${encodeURIComponent(so.id)}`, { sort_order: so, ...(version ? { version } : {}) });
+export const deleteSortOrder = (id: string, version?: number) => call('DELETE', `/sort_orders/${encodeURIComponent(id)}`, version ? { version } : {});
+
+// Criteria on a metric that is not defined in /metrics.
+export const unknownMetricFields = (so: SortOrder, metrics: Metric[]) =>
+  (so.sort_criterias || []).map(c => c.field).filter(f => f?.startsWith(METRIC_FIELD_PREFIX) && !metrics.some(m => f === METRIC_FIELD_PREFIX + m.id || f === METRIC_FIELD_PREFIX + m.name));
+export const sortOrderLabel = (so: SortOrder) => [
+  ...(so.sort_orders || []),
+  ...(so.sort_criterias || []).map(c => `${c.field.replace(METRIC_FIELD_PREFIX, 'metric ')} ${c.desc ? '↓' : '↑'}`),
+].join(' → ') || 'no criteria';
