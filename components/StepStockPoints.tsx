@@ -3,7 +3,7 @@ import { StockPointDraft, StockPointPushResult, StockPointSet } from '../types';
 import { settingsStore, stockPointSetsStore } from '../services/appStores';
 import { savedPayloadsStore, listProjects, getLastProject, setLastProject, downloadJson } from '../services/payloadStore';
 import { useApiTarget, missingTargetFields, isProductionTarget, SITE_ID_VAR, TOKEN_VAR } from '../services/onestockClient';
-import { generateStockPoints, createStockPoints, getAiStatus, AiStatus, MAX_STOCK_POINTS } from '../services/stockPointService';
+import { generateStockPoints, createStockPoints, getAiStatus, AiStatus, MAX_STOCK_POINTS, withOpeningHours247 } from '../services/stockPointService';
 import StockPointsMap from './StockPointsMap';
 
 const labelClass = 'block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5';
@@ -154,7 +154,7 @@ const StepStockPoints: React.FC = () => {
     }
   };
 
-  const payloadForDownload = current && { site_id: SITE_ID_VAR, token: TOKEN_VAR, endpoints: current.endpoints };
+  const payloadForDownload = current && { site_id: SITE_ID_VAR, token: TOKEN_VAR, endpoints: current.endpoints.map(withOpeningHours247) };
   const results: Record<string, StockPointPushResult> = current?.pushResults || {};
   const createdCount = current ? current.endpoints.filter(e => results[e.id]?.ok).length : 0;
   const failedCount = current ? current.endpoints.filter(e => results[e.id] && !results[e.id].ok).length : 0;

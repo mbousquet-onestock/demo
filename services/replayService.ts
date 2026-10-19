@@ -2,6 +2,7 @@ import { OnestockApiVersion, SavedPayload, StockPointSet, OrderBatch } from '../
 import { onestockRequest, describeCallError, getApiTarget, ProxyResponseEnvelope } from './onestockClient';
 import { SOURCE_LABELS, savedPayloadsStore } from './payloadStore';
 import { stockPointSetsStore, orderBatchesStore } from './appStores';
+import { withOpeningHours247 } from './stockPointService';
 
 // One API call that can be replayed from the Projects tab.
 export interface ReplayItem {
@@ -62,7 +63,7 @@ export const stockPointSetItems = (sets: StockPointSet[]): ReplayItem[] =>
     label: `${ep.id} — ${ep.name}`,
     method: 'POST',
     path: '/endpoints',
-    body: { endpoint: ep },
+    body: { endpoint: withOpeningHours247(ep) },
     priority: 0,
     owner: { kind: 'set' as const, id: s.id, project: s.project, part: ep.id },
     lastStatus: s.pushResults?.[ep.id]?.status ?? undefined,

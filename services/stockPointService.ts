@@ -65,6 +65,18 @@ const endpointsVersion = (): OnestockApiVersion => {
   return v === 'v4' ? 'v4' : 'v3';
 };
 
+// Opening hours 24/7: one timespan over the whole week (seconds from Monday 00:00 to 604800); the timezone is
+// mandatory with opening hours. Opening hours already set on a stock point are kept.
+export const WEEK_SECONDS = 604800;
+export const withOpeningHours247 = (ep: StockPointDraft): StockPointDraft => {
+  const timezone = (typeof ep.timezone === 'string' && ep.timezone) || 'Europe/Paris';
+  return ep.opening_hours ? { ...ep, timezone } : {
+    ...ep,
+    timezone,
+    opening_hours: { timezone, timespans: [{ start: 0, end: WEEK_SECONDS }] },
+  };
+};
+
 const toResult = (ok: boolean, status: number | null, message: string, requestId?: string): StockPointPushResult =>
   ({ ok, status, message, requestId, at: new Date().toISOString() });
 
@@ -80,7 +92,7 @@ export const createStockPoints = async (
     let done = 0;
     for (const ep of endpoints) {
       try {
-        const { envelope } = await onestockRequest({ method: 'POST', path: '/endpoints', body: { endpoint: ep }, version });
+        const { envelope } = await onestockRequest({ method: 'POST', path: '/endpoints', body: { endpoint: withOpeningHours247(ep) }, version });
         results[ep.id] = toResult(envelope.ok, envelope.status, envelope.ok ? 'Created' : describeCallError(envelope), envelope.headers?.['request-id']);
       } catch (err: any) {
         results[ep.id] = toResult(false, null, err?.message || String(err));
@@ -94,7 +106,7 @@ export const createStockPoints = async (
     const chunk = endpoints.slice(i, i + BULK_CHUNK);
     let result: StockPointPushResult;
     try {
-      const { envelope } = await onestockRequest({ method: 'POST', path: '/endpoints', body: { endpoints: chunk }, version });
+      const { envelope } = await onestockRequest({ method: 'POST', path: '/endpoints', body: { endpoints: chunk.map(withOpeningHours247) }, version });
       result = toResult(envelope.ok, envelope.status, envelope.ok ? 'Created (bulk)' : describeCallError(envelope), envelope.headers?.['request-id']);
     } catch (err: any) {
       result = toResult(false, null, err?.message || String(err));
