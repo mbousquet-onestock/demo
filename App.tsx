@@ -14,6 +14,7 @@ import StepManualSteps from './components/StepManualSteps';
 import StepProjects from './components/StepProjects';
 import StepDeliveryRoutes from './components/StepDeliveryRoutes';
 import StepDeliveryCreate from './components/StepDeliveryCreate';
+import StepDeliveryMetrics from './components/StepDeliveryMetrics';
 import { settingsStore } from './services/appStores';
 import { initDbSync, migrateLegacyLocalConnections } from './services/dbSync';
 import { onestockItemsToProducts } from './utils/payloadUtils';
@@ -130,6 +131,8 @@ const App: React.FC = () => {
             {currentStep === AppStep.DELIVERY_ROUTES && <StepDeliveryRoutes />}
 
             {currentStep === AppStep.DELIVERY_CREATE && <StepDeliveryCreate />}
+
+            {currentStep === AppStep.DELIVERY_METRICS && <StepDeliveryMetrics />}
 
             {currentStep === AppStep.SETTINGS && (
               <Settings settings={settings} onSave={setSettings} />
