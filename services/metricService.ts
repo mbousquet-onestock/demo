@@ -65,9 +65,11 @@ const fetchAll = async <T extends { id: string }>(path: string, key: string, one
 export const fetchMetrics = () => fetchAll<Metric>('/metrics', 'metrics', 'metric');
 
 // POST /metrics or PATCH /metrics/{id} {metric: {id, name, operator}}; version: Delivery Promise version (current if empty).
-// unit is not in the documented metric (name, operator): sent only when filled.
-export const saveMetric = (m: { id: string; name: string; operator: string; unit?: string }, update: boolean, version?: number) =>
-  save('/metrics', 'metric', { id: m.id, name: m.name || m.id, operator: m.operator, ...(m.unit?.trim() ? { unit: m.unit.trim() } : {}) }, update, version);
+// The metric has no unit field (name, operator only): the name carries the unit (EUR, gCO2…).
+export const saveMetric = (m: { id: string; name: string; operator: string }, update: boolean, version?: number) =>
+  save('/metrics', 'metric', { id: m.id, name: m.name.trim() || m.id, operator: m.operator }, update, version);
+// Unit of a metric: its name when it differs from the id.
+export const metricUnit = (m: Metric) => (m.name && m.name !== m.id ? String(m.name) : '');
 export const METRIC_UNITS = ['EUR', 'USD', 'GBP', 'gCO2', 'kgCO2', 'kg', 'h', '%'];
 // 409 when the metric is still referenced.
 export const deleteMetric = (id: string, version?: number) => call('DELETE', `/metrics/${encodeURIComponent(id)}`, version ? { version } : {});
