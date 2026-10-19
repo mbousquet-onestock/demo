@@ -4,7 +4,7 @@ import { neon, neonConfig } from '@neondatabase/serverless';
 import { timingSafeEqual } from 'node:crypto';
 import { encryptSecrets, decryptSecrets, hasPlainSecrets } from './_secrets.js';
 
-export const DATA_COLLECTIONS = ['history', 'connections', 'saved_payloads', 'settings', 'app_state', 'stock_point_sets', 'order_batches', 'manual_steps', 'product_captures'] as const;
+export const DATA_COLLECTIONS = ['history', 'connections', 'saved_payloads', 'settings', 'app_state', 'stock_point_sets', 'order_batches', 'manual_steps', 'product_captures', 'delivery_scripts'] as const;
 export type DataCollection = typeof DATA_COLLECTIONS[number];
 
 export interface DataDocument {

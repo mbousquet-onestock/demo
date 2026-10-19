@@ -76,6 +76,12 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
   dated exceptions (bank holidays, leaves, stock takes, special operations) with their timetable types, links (stock
   points, zones, carriers, carrier options) and options; attached to the timetables / routes / stock points they apply
   to, closures (`open: false`) reported in the analysis and as delivery promise causes.
+  **+ Create (AI)**: describe the configuration to create (examples given); ChatGPT (task `delivery_config`, with the
+  existing zones / routes / timetables / stock points as context) writes the operations — carrier timetables
+  (`POST /timetables`), zones (`POST /zones`), delivery routes (`POST /delivery_routes`); they are checked (unknown
+  references, existing ids, 0 transit time, no cost…), editable as JSON, run in order (a route whose zone / timetable
+  failed is skipped) and saved as scripts per project (database collection `delivery_scripts`, listed and replayable in
+  the Projects tab). OneStock has no carrier API of its own: carriers are defined in the routes and their timetables.
   **Execution times** (`GET /execution_times`): operation, duration ("2h", "30m"), execution moment and timetable
   (weekly view), the stock points using them (when GET /endpoints returns their `execution_times`); unreadable durations,
   missing / empty timetables and always_at_start without timetable are flagged, in the analysis and as promise causes.

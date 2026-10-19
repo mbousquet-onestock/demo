@@ -331,3 +331,22 @@ export interface ProductCaptureSet {
   updatedAt: string;
   products: CapturedProduct[];
 }
+
+// Delivery Promise configuration script (Delivery Routes → Create): API operations generated from a prompt.
+export interface DeliveryScriptOperation {
+  id: string;
+  kind: 'timetable' | 'zone' | 'delivery_route';
+  label: string;
+  body: Record<string, any>;
+  result?: { ok: boolean; status: number | null; message: string; at: string; requestId?: string };
+}
+
+export interface DeliveryScript {
+  id: string;
+  name: string;
+  project?: string;
+  prompt: string;
+  operations: DeliveryScriptOperation[];
+  createdAt: string;
+  updatedAt: string;
+}

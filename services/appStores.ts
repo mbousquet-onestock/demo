@@ -1,4 +1,4 @@
-import { AppSettings, DEFAULT_SETTINGS, StockPointSet, OrderBatch, ManualStep, ProductCaptureSet, CapturedProduct } from '../types';
+import { AppSettings, DEFAULT_SETTINGS, StockPointSet, OrderBatch, ManualStep, ProductCaptureSet, CapturedProduct, DeliveryScript } from '../types';
 import { createPersistedStore } from './persistedStore';
 
 export const settingsStore = createPersistedStore<AppSettings>('onestock_app_settings', DEFAULT_SETTINGS);
@@ -8,3 +8,4 @@ export const manualStepsStore = createPersistedStore<ManualStep[]>('onestock_man
 export const productCapturesStore = createPersistedStore<ProductCaptureSet[]>('onestock_product_captures', []);
 // Products received from the capture bookmarklet, not saved yet (this browser only).
 export const captureInboxStore = createPersistedStore<CapturedProduct[]>('onestock_capture_inbox', []);
+export const deliveryScriptsStore = createPersistedStore<DeliveryScript[]>('onestock_delivery_scripts', []);

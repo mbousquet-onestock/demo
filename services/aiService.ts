@@ -5,7 +5,7 @@ import { logApiCall } from './apiLog';
 export const AI_ENDPOINT = '/api/ai';
 export const DEFAULT_AI_MODEL = 'gpt-4.1-mini';
 
-export type AiTask = 'stock_points' | 'customers' | 'prices';
+export type AiTask = 'stock_points' | 'customers' | 'prices' | 'delivery_config';
 
 export interface AiStatus {
   serverKey: boolean;

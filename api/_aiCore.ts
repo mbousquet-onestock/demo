@@ -19,7 +19,7 @@ const hasValidAppKey = (request: Request): boolean => {
   return !!expected && given.length === expected.length && timingSafeEqual(Buffer.from(given), Buffer.from(expected));
 };
 
-export type AiTask = 'stock_points' | 'customers' | 'prices';
+export type AiTask = 'stock_points' | 'customers' | 'prices' | 'delivery_config';
 
 export interface GenerateRequest {
   // Defaults to "stock_points".
@@ -38,6 +38,8 @@ export interface GenerateRequest {
   // prices: articles to price.
   items?: { sku: string; name?: string; category?: string; description?: string }[];
   currency?: string;
+  // delivery_config: ids already configured on the site (zones, routes, timetables, stock points, carriers).
+  existing?: Record<string, string[]>;
 }
 
 const STOCK_POINTS_PROMPT = `You generate realistic test data for the OneStock order management system.
@@ -78,6 +80,39 @@ Return ONLY a JSON object: {"prices": [{"sku": "...", "price": number}]} with on
 price as a number with 2 decimals in the requested currency, consistent with the product name, category and a typical
 mid-market retailer. Do not add any other text.`;
 
+const DELIVERY_CONFIG_PROMPT = `You configure the OneStock Delivery Promise module: carrier timetables, zones and delivery routes.
+Return ONLY a JSON object: {"operations": [ ... ]} where each operation is
+{"kind": "timetable" | "zone" | "delivery_route", "label": "short description of the operation", "body": { ... }}
+and "body" is exactly the object sent to the OneStock API:
+
+kind "timetable" (POST /timetables {"timetable": body}) — carrier schedules:
+{"id": "snake_case id", "name": "...", "type": "carrier_pickup_timetable" | "carrier_transit_timetable" | "carrier_delivery_timetable",
+ "hours": {"timezone": "IANA timezone, e.g. Europe/Paris",
+           "timespans": [{"start": integer, "end": integer}]}}
+Timespans are seconds from Monday 00:00 (0) to the end of the week (604800): day d (0 = Monday … 6 = Sunday) from H1 to H2
+is {"start": d*86400 + H1*3600, "end": d*86400 + H2*3600}. Example Monday-Friday 14:00-17:00 pickup:
+[{"start":50400,"end":61200},{"start":136800,"end":147600},{"start":223200,"end":234000},{"start":309600,"end":320400},{"start":396000,"end":406800}].
+
+kind "zone" (POST /zones {"zone": body}) — origin zones (where stock points are) or destination zones (customer addresses):
+{"id": "snake_case id", "name": "...", "comment": "...",
+ "country_codes": ["FR"], "regions": ["state codes"], "timezones": ["Europe/Paris"],
+ "zip_code": "regular expression of accepted zip codes, e.g. ^(75|92|93|94)", "excluded_zip_code": "e.g. ^(20|97|98)",
+ "included_endpoint_ids": ["stock point ids"], "excluded_endpoint_ids": [], "included_zones": ["zone ids"], "excluded_zones": []}
+Only set the criteria needed (all set criteria must match; included_endpoint_ids / included_zones add places; exclusions win).
+
+kind "delivery_route" (POST /delivery_routes {"delivery_route": body}) — a carrier serving a destination zone from an origin zone:
+{"id": "snake_case id", "origin_zone_id": "...", "destination_zone_id": "...",
+ "carrier": {"name": "carrier name, e.g. colissimo", "option": "carrier option / service, e.g. standard, express, relay"},
+ "minimum_transit_hours": integer > 0, "maximum_transit_hours": integer >= minimum,
+ "pickup_timetable_id": "...", "delivery_timetable_id": "...", "opening_timetable_id": "... (optional)",
+ "metric_values": {"cost": delivery cost as a number},
+ "constraints": {"parcel_constraints": [{"formula": "sumW", "op": "<=", "value": max weight in kg}]} (optional)}
+
+Rules: operations in this order: timetables, then zones, then delivery routes. Ids are lowercase snake_case, unique, and
+must not reuse an existing id unless the user asks to. A route may only reference zones and timetables created here or
+listed as existing. Transit times are never 0 and every route has a cost. Use realistic carrier schedules and transit
+times for the countries involved. Follow the user's request precisely. Do not add any other text.`;
+
 interface TaskDefinition {
   system: string;
   resultKey: string;
@@ -87,6 +122,20 @@ interface TaskDefinition {
 }
 
 const TASKS: Record<AiTask, TaskDefinition> = {
+  delivery_config: {
+    system: DELIVERY_CONFIG_PROMPT,
+    resultKey: 'operations',
+    maxBatch: 1,
+    validate: b => (b.context?.trim() ? null : 'Missing "context".'),
+    userPrompt: b => {
+      const ex = b.existing || {};
+      const list = (k: string, max = 300) => (Array.isArray(ex[k]) && ex[k].length ? `Existing ${k}: ${ex[k].slice(0, max).join(', ')}` : '');
+      return [
+        `Request: ${b.context!.trim()}`,
+        list('zones'), list('delivery_routes'), list('timetables'), list('stock_points', 400), list('carriers'),
+      ].filter(Boolean).join('\n');
+    },
+  },
   stock_points: {
     system: STOCK_POINTS_PROMPT,
     resultKey: 'endpoints',

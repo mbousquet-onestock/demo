@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { savedPayloadsStore } from '../services/payloadStore';
-import { stockPointSetsStore, orderBatchesStore, manualStepsStore } from '../services/appStores';
+import { stockPointSetsStore, orderBatchesStore, manualStepsStore, deliveryScriptsStore } from '../services/appStores';
 import { useApiTarget, missingTargetFields, isProductionTarget } from '../services/onestockClient';
 import {
-  savedPayloadItems, stockPointSetItems, orderBatchItems, replayItem, deleteReplayItems, ReplayItem, ReplayResult,
+  savedPayloadItems, stockPointSetItems, orderBatchItems, deliveryScriptItems, replayItem, deleteReplayItems, ReplayItem, ReplayResult,
 } from '../services/replayService';
 import { listImageProjects, renameImageProject } from '../services/imageHosting';
 import ProjectImages from './ProjectImages';
@@ -40,6 +40,7 @@ const renameFolder = (from: string, to: string) => {
   stockPointSetsStore.set(prev => move(prev, true));
   orderBatchesStore.set(prev => move(prev, true));
   manualStepsStore.set(prev => move(prev, true));
+  deliveryScriptsStore.set(prev => move(prev, true));
 };
 
 const methodColor = (m: string) =>
@@ -58,10 +59,11 @@ const StepProjects: React.FC = () => {
   const sets = stockPointSetsStore.use();
   const batches = orderBatchesStore.use();
   const steps = manualStepsStore.use();
+  const scripts = deliveryScriptsStore.use();
   const target = useApiTarget();
   const targetMissing = missingTargetFields(target);
 
-  type Stats = { payloads: number; sets: number; points: number; batches: number; orders: number; steps: number; stepsDone: number; images: number };
+  type Stats = { payloads: number; sets: number; points: number; batches: number; orders: number; steps: number; stepsDone: number; images: number; scripts: number };
   // Images copied to the database, per project (server side).
   const [imageCounts, setImageCounts] = useState<{ project: string; count: number }[]>([]);
   const refreshImages = () => listImageProjects().then(setImageCounts).catch(() => setImageCounts([]));
@@ -70,7 +72,7 @@ const StepProjects: React.FC = () => {
   const own = useMemo(() => {
     const map = new Map<string, Stats>();
     const get = (k: string) => {
-      if (!map.has(k)) map.set(k, { payloads: 0, sets: 0, points: 0, batches: 0, orders: 0, steps: 0, stepsDone: 0, images: 0 });
+      if (!map.has(k)) map.set(k, { payloads: 0, sets: 0, points: 0, batches: 0, orders: 0, steps: 0, stepsDone: 0, images: 0, scripts: 0 });
       return map.get(k)!;
     };
     payloads.forEach(p => { get(keyOf(p.project)).payloads++; });
@@ -78,15 +80,16 @@ const StepProjects: React.FC = () => {
     batches.forEach(b => { const e = get(keyOf(b.project)); e.batches++; e.orders += b.packages.reduce((n, p) => n + p.subOrders.length, 0); });
     steps.forEach(s => { const e = get(keyOf(s.project)); e.steps++; if (s.status === 'done') e.stepsDone++; });
     imageCounts.forEach(i => { get(keyOf(i.project)).images += i.count; });
+    scripts.forEach(sc => { get(keyOf(sc.project)).scripts++; });
     return map;
-  }, [payloads, sets, batches, steps, imageCounts]);
+  }, [payloads, sets, batches, steps, imageCounts, scripts]);
 
   // Folder tree: every project path and its parent folders, with the totals of their sub-folders.
   const projects = useMemo(() => {
     const keys = new Set<string>();
     own.forEach((_, k) => { keys.add(k); parentsOf(k).forEach(p => keys.add(p)); });
     return [...keys].sort(compareKeys).map(k => {
-      const total: Stats = { payloads: 0, sets: 0, points: 0, batches: 0, orders: 0, steps: 0, stepsDone: 0, images: 0 };
+      const total: Stats = { payloads: 0, sets: 0, points: 0, batches: 0, orders: 0, steps: 0, stepsDone: 0, images: 0, scripts: 0 };
       own.forEach((s, key) => {
         if (!inFolder(key, k)) return;
         (Object.keys(total) as (keyof Stats)[]).forEach(f => { total[f] += s[f]; });
@@ -110,6 +113,7 @@ const StepProjects: React.FC = () => {
       ...savedPayloadItems(pick(payloads)),
       ...stockPointSetItems(pick(sets)),
       ...orderBatchItems(pick(batches)),
+      ...deliveryScriptItems(pick(scripts)),
     ];
     // Calls of sub-folders are grouped under their sub-folder name.
     return all.map(i => {
@@ -117,7 +121,7 @@ const StepProjects: React.FC = () => {
       return k === current ? i : { ...i, group: `${k.slice(current.length + 1)} › ${i.group}` };
     }).sort((a, b) => compareKeys(keyOf(a.owner.project), keyOf(b.owner.project)));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current, withSubfolders, payloads, sets, batches]);
+  }, [current, withSubfolders, payloads, sets, batches, scripts]);
 
   const projectSteps = steps.filter(s => inScope(s.project)).sort((a, b) => compareKeys(keyOf(a.project), keyOf(b.project)) || a.order - b.order);
 
@@ -178,7 +182,7 @@ const StepProjects: React.FC = () => {
 
   const replayed = items.filter(i => results[i.key]);
   const okCount = replayed.filter(i => results[i.key].ok).length;
-  const stats = withSubfolders ? projects.find(([k]) => k === current)?.[1] : (current && own.get(current)) || (current ? { payloads: 0, sets: 0, points: 0, batches: 0, orders: 0, steps: 0, stepsDone: 0, images: 0 } : undefined);
+  const stats = withSubfolders ? projects.find(([k]) => k === current)?.[1] : (current && own.get(current)) || (current ? { payloads: 0, sets: 0, points: 0, batches: 0, orders: 0, steps: 0, stepsDone: 0, images: 0, scripts: 0 } : undefined);
   const searching = projectSearch.trim().toLowerCase();
   const filteredProjects = projects.filter(([k]) => searching
     ? titleOf(k).toLowerCase().includes(searching)
@@ -191,7 +195,8 @@ const StepProjects: React.FC = () => {
     const to = normPath(dest) || undefined;
     const ids = (kind: string) => new Set(selectedOwners.filter(o => o.kind === kind).map(o => o.id));
     const now = new Date().toISOString();
-    const payloadIds = ids('payload'), setIds = ids('set'), batchIds = ids('batch');
+    const payloadIds = ids('payload'), setIds = ids('set'), batchIds = ids('batch'), scriptIds = ids('script');
+    if (scriptIds.size) deliveryScriptsStore.set(prev => prev.map(sc => (scriptIds.has(sc.id) ? { ...sc, project: to, updatedAt: now } : sc)));
     if (payloadIds.size) savedPayloadsStore.set(prev => prev.map(p => (payloadIds.has(p.id) ? { ...p, project: to } : p)));
     if (setIds.size) stockPointSetsStore.set(prev => prev.map(s => (setIds.has(s.id) ? { ...s, project: to, updatedAt: now } : s)));
     if (batchIds.size) orderBatchesStore.set(prev => prev.map(b => (batchIds.has(b.id) ? { ...b, project: to, updatedAt: now } : b)));
@@ -261,7 +266,7 @@ const StepProjects: React.FC = () => {
                         {searching ? titleOf(k) : leafOf(k)}
                       </p>
                       <p className="text-[10px] text-gray-400 mt-0.5">
-                        {[s.payloads && `${s.payloads} payload(s)`, s.sets && `${s.points} stock point(s)`, s.batches && `${s.orders} order(s)`, s.steps && `${s.stepsDone}/${s.steps} step(s)`, s.images && `${s.images} image(s)`].filter(Boolean).join(' · ')}
+                        {[s.payloads && `${s.payloads} payload(s)`, s.sets && `${s.points} stock point(s)`, s.batches && `${s.orders} order(s)`, s.steps && `${s.stepsDone}/${s.steps} step(s)`, s.images && `${s.images} image(s)`, s.scripts && `${s.scripts} delivery script(s)`].filter(Boolean).join(' · ')}
                       </p>
                     </button>
                     {!searching && hasChildren(k) && (

@@ -1,7 +1,8 @@
-import { OnestockApiVersion, SavedPayload, StockPointSet, OrderBatch } from '../types';
+import { OnestockApiVersion, SavedPayload, StockPointSet, OrderBatch, DeliveryScript } from '../types';
 import { onestockRequest, describeCallError, getApiTarget, ProxyResponseEnvelope } from './onestockClient';
 import { SOURCE_LABELS, savedPayloadsStore } from './payloadStore';
-import { stockPointSetsStore, orderBatchesStore } from './appStores';
+import { stockPointSetsStore, orderBatchesStore, deliveryScriptsStore } from './appStores';
+import { OPERATION_KINDS } from './deliveryScriptService';
 import { withOpeningHours247 } from './stockPointService';
 
 // One API call that can be replayed from the Projects tab.
@@ -16,7 +17,7 @@ export interface ReplayItem {
   // Execution order of a mass replay: parent orders before their orders.
   priority: number;
   // Saved document holding the call (moving it to another project moves the whole document).
-  owner: { kind: 'payload' | 'set' | 'batch'; id: string; project?: string; part?: string };
+  owner: { kind: 'payload' | 'set' | 'batch' | 'script'; id: string; project?: string; part?: string };
   // part: endpoint id (stock point set), "parent:<id>" / "order:<id>" (order batch).
   lastStatus?: number;
   lastResponse?: unknown;
@@ -107,6 +108,24 @@ export const orderBatchItems = (batches: OrderBatch[]): ReplayItem[] =>
     ];
   }));
 
+// Delivery Promise configuration scripts: timetables, then zones, then routes (before every other call).
+export const deliveryScriptItems = (scripts: DeliveryScript[]): ReplayItem[] =>
+  scripts.flatMap(sc => sc.operations.map(op => {
+    const meta = OPERATION_KINDS[op.kind];
+    return {
+      key: `script:${sc.id}:${op.id}`,
+      group: `Delivery config · ${sc.name}`,
+      label: `${meta.label} ${op.body?.id || ''} — ${op.label}`,
+      method: 'POST',
+      path: meta.path,
+      body: { [meta.key]: op.body },
+      priority: meta.order - 3,
+      owner: { kind: 'script' as const, id: sc.id, project: sc.project, part: op.id },
+      lastStatus: op.result?.status ?? undefined,
+      lastResponse: op.result?.message,
+    };
+  }));
+
 const needsV3OrV4 = (path: string) => /^\/(endpoints|orders|items)(\/|$|\?)/.test(path);
 
 export const replayItem = async (item: ReplayItem): Promise<ReplayResult> => {
@@ -141,6 +160,13 @@ export const deleteReplayItems = (items: ReplayItem[]) => {
     return map;
   };
   const setParts = parts('set');
+  const scriptParts = parts('script');
+  if (scriptParts.size) deliveryScriptsStore.set(prev => prev.flatMap(sc => {
+    const gone = scriptParts.get(sc.id);
+    if (!gone) return [sc];
+    const operations = sc.operations.filter(o => !gone.has(o.id));
+    return operations.length ? [{ ...sc, operations, updatedAt: now }] : [];
+  }));
   const batchParts = parts('batch');
 
   if (payloadIds.size) savedPayloadsStore.set(prev => prev.filter(p => !payloadIds.has(p.id)));
