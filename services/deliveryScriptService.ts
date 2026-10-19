@@ -6,8 +6,9 @@ import { DeliveryConfig } from './deliveryRouteService';
 // Creation APIs of the Delivery Promise configuration, in execution order.
 export const OPERATION_KINDS = {
   timetable: { path: '/timetables', key: 'timetable', label: 'Carrier timetable', order: 0 },
-  zone: { path: '/zones', key: 'zone', label: 'Zone', order: 1 },
-  delivery_route: { path: '/delivery_routes', key: 'delivery_route', label: 'Delivery route', order: 2 },
+  // Delivery Time Calculator entities: POST /{entity}/{id}.
+  zone: { path: '/zones', key: 'zone', label: 'Zone', order: 1, withId: true },
+  delivery_route: { path: '/delivery_routes', key: 'delivery_route', label: 'Delivery route', order: 2, withId: true },
 } as const;
 export type OperationKind = keyof typeof OPERATION_KINDS;
 
@@ -28,6 +29,7 @@ export const generateOperations = async (prompt: string, config: DeliveryConfig 
     timetables: Object.keys(config.timetables || {}),
     stock_points: config.endpoints.map(e => e.id),
     carriers: [...new Set(config.routes.map(r => [r.carrier?.name, r.carrier?.option].filter(Boolean).join(' / ')).filter(Boolean))],
+    metric_keys: [...new Set(config.routes.flatMap(r => Object.keys(r.metric_values || {})))],
   } : undefined;
   const data = await callAi<{ operations: any[] }>('delivery_config', { context: prompt, existing }, 'delivery configuration');
   return (data.operations || [])
@@ -69,6 +71,8 @@ export const operationIssues = (op: DeliveryScriptOperation, all: DeliveryScript
     const unknown = (b.included_endpoint_ids || []).filter((id: string) => config && !config.endpoints.some(e => e.id === id));
     if (unknown.length) issues.push(`unknown stock point(s): ${unknown.join(', ')}`);
     [...(b.included_zones || []), ...(b.excluded_zones || [])].filter((z: string) => !zones.has(z)).forEach((z: string) => issues.push(`unknown zone ${z}`));
+    const criteria = ['country_codes', 'regions', 'zip_code', 'excluded_zip_code', 'timezones'].filter(k => Array.isArray(b[k]) ? b[k].length : b[k]);
+    if ((b.included_zones?.length || b.excluded_zones?.length) && criteria.length) issues.push(`included / excluded zones cannot be combined with ${criteria.join(', ')}`);
     try { if (b.zip_code) new RegExp(b.zip_code); if (b.excluded_zip_code) new RegExp(b.excluded_zip_code); } catch { issues.push('invalid zip regex'); }
   }
   if (op.kind === 'delivery_route') {
@@ -85,7 +89,8 @@ export const runOperation = async (op: DeliveryScriptOperation): Promise<NonNull
   const meta = OPERATION_KINDS[op.kind];
   const at = new Date().toISOString();
   try {
-    const { envelope } = await onestockRequest({ method: 'POST', path: meta.path, body: { [meta.key]: op.body } });
+    const path = 'withId' in meta && op.body?.id ? `${meta.path}/${encodeURIComponent(op.body.id)}` : meta.path;
+    const { envelope } = await onestockRequest({ method: 'POST', path, body: { [meta.key]: op.body } });
     return { ok: envelope.ok, status: envelope.status, message: envelope.ok ? `Created (HTTP ${envelope.status})` : describeCallError(envelope), at, requestId: envelope.headers?.['request-id'] };
   } catch (err: any) {
     return { ok: false, status: null, message: err?.message || String(err), at };

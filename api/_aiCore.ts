@@ -100,13 +100,15 @@ kind "zone" (POST /zones {"zone": body}) — origin zones (where stock points ar
  "zip_code": "regular expression of accepted zip codes, e.g. ^(75|92|93|94)", "excluded_zip_code": "e.g. ^(20|97|98)",
  "included_endpoint_ids": ["stock point ids"], "excluded_endpoint_ids": [], "included_zones": ["zone ids"], "excluded_zones": []}
 Only set the criteria needed (all set criteria must match; included_endpoint_ids / included_zones add places; exclusions win).
+included_zones / excluded_zones cannot be combined with country_codes, regions, zip_code, excluded_zip_code or timezones
+in the same zone: a zone is either built from other zones or from criteria.
 
 kind "delivery_route" (POST /delivery_routes {"delivery_route": body}) — a carrier serving a destination zone from an origin zone:
 {"id": "snake_case id", "origin_zone_id": "...", "destination_zone_id": "...",
  "carrier": {"name": "carrier name, e.g. colissimo", "option": "carrier option / service, e.g. standard, express, relay"},
  "minimum_transit_hours": integer > 0, "maximum_transit_hours": integer >= minimum,
  "pickup_timetable_id": "...", "delivery_timetable_id": "...", "opening_timetable_id": "... (optional)",
- "metric_values": {"cost": delivery cost as a number},
+ "metric_values": {"<metric>": number} — delivery cost under the existing metric key when given (e.g. cost_by_parcel), else "cost",
  "constraints": {"parcel_constraints": [{"formula": "sumW", "op": "<=", "value": max weight in kg}]} (optional)}
 
 Rules: operations in this order: timetables, then zones, then delivery routes. Ids are lowercase snake_case, unique, and
@@ -133,7 +135,7 @@ const TASKS: Record<AiTask, TaskDefinition> = {
       const list = (k: string, max = 300) => (Array.isArray(ex[k]) && ex[k].length ? `Existing ${k}: ${ex[k].slice(0, max).join(', ')}` : '');
       return [
         `Request: ${b.context!.trim()}`,
-        list('zones'), list('delivery_routes'), list('timetables'), list('stock_points', 400), list('carriers'),
+        list('zones'), list('delivery_routes'), list('timetables'), list('stock_points', 400), list('carriers'), list('metric_keys'),
       ].filter(Boolean).join('\n');
     },
   },

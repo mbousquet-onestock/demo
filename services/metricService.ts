@@ -1,10 +1,19 @@
 import { onestockRequest, describeCallError } from './onestockClient';
 import { DeliveryRoute } from './deliveryRouteService';
 
-// Delivery Promise metrics (GET /metrics): the keys of the routes' metric_values (cost, CO2…).
+// Delivery Promise metrics (Delivery Time Calculator): the keys of the routes' metric_values (cost_by_parcel,
+// carbon_footprint…) and the operator combining the values of a promise's routes.
+export const METRIC_OPERATORS = [
+  { id: 'sum', label: 'sum — total of the routes (e.g. cost of all parcels)' },
+  { id: 'min', label: 'min — lowest value' },
+  { id: 'max', label: 'max — highest value' },
+] as const;
+export type MetricOperator = typeof METRIC_OPERATORS[number]['id'];
+
 export interface Metric {
   id: string;
   name?: string;
+  operator?: MetricOperator | string;
   [key: string]: unknown;
 }
 
@@ -38,8 +47,14 @@ export const fetchMetrics = async (): Promise<Metric[]> => {
   return out;
 };
 
-export const createMetric = (body: Record<string, unknown>) => call('POST', '/metrics', body);
-export const deleteMetric = (id: string) => call('DELETE', `/metrics/${encodeURIComponent(id)}`, {});
+// POST (create) or PATCH (update) /metrics/{id} {metric: {name, operator}}; version: Delivery Promise version (current if empty).
+export const saveMetric = (m: { id: string; name: string; operator: string }, update: boolean, version?: number) =>
+  call(update ? 'PATCH' : 'POST', `/metrics/${encodeURIComponent(m.id)}`, { metric: { name: m.name || m.id, operator: m.operator }, ...(version ? { version } : {}) });
+// 409 when the metric is still referenced.
+export const deleteMetric = (id: string, version?: number) => call('DELETE', `/metrics/${encodeURIComponent(id)}`, version ? { version } : {});
+
+// Key of the routes' metric_values for a metric (its id, or its name).
+export const metricKey = (m: Metric, usages: Map<string, unknown>) => (usages.has(m.id) ? m.id : m.name && usages.has(m.name) ? m.name : m.id);
 
 export interface MetricUsage {
   key: string;
