@@ -516,6 +516,8 @@ export interface TimetableReport {
   // Weekly spans per day (0 = Monday), seconds from the start of the day.
   days: { start: number; end: number }[][];
   hoursPerWeek: number;
+  // Times (start = end, e.g. carrier pickup hours) per week.
+  times: number;
   // Spans given as dates (exceptions / one-off openings).
   exceptions: string[];
   summary: string;
@@ -583,17 +585,28 @@ export const normalizedSpans = (t: any): { start: number; end: number; date: boo
 // Weekly spans are seconds from Monday 00:00 (values above one week are read as dates).
 export const timetableReport = (id: string | undefined, timetables: Record<string, Timetable> | undefined): TimetableReport => {
   const days: { start: number; end: number }[][] = DAYS.map(() => []);
-  if (!id) return { status: 'not-set', days, hoursPerWeek: 0, exceptions: [], summary: 'not set on the route' };
+  if (!id) return { status: 'not-set', days, hoursPerWeek: 0, times: 0, exceptions: [], summary: 'not set on the route' };
   const t = timetables?.[id];
-  if (!t) return { status: 'not-found', days, hoursPerWeek: 0, exceptions: [], summary: `timetable ${id} not found` };
+  if (!t) return { status: 'not-found', days, hoursPerWeek: 0, times: 0, exceptions: [], summary: `timetable ${id} not found` };
   const spans = normalizedSpans(t);
   const exceptions: string[] = [];
   let seconds = 0;
+  let times = 0;
   spans.forEach(sp => {
-    const { start, end } = sp;
-    if (!isFinite(start) || !isFinite(end) || end <= start) return;
+    const { start } = sp;
+    // No end: a time (pickup at 14:00), not a period.
+    let end = isFinite(sp.end) ? sp.end : start;
+    if (!isFinite(start)) return;
     // Span explicitly closed (options.open false): not an opening.
     if (sp.options?.open === false && !sp.date) return;
+    // Week span running over Sunday → Monday.
+    if (!sp.date && end < start) end += WEEK;
+    // Time (start = end): pickup / delivery hour of carrier timetables.
+    if (end === start) {
+      if (sp.date) exceptions.push(new Date(start * 1000).toLocaleString());
+      else { days[Math.floor(start / 86400) % 7].push({ start: start % 86400, end: start % 86400 }); times++; }
+      return;
+    }
     if (sp.date) {
       const closed = sp.options && Object.entries(sp.options).filter(([, v]) => v).map(([k]) => k).join(', ');
       exceptions.push(`${new Date(start * 1000).toLocaleString()} → ${new Date(end * 1000).toLocaleString()}${closed ? ` (${closed})` : ''}`);
@@ -611,18 +624,21 @@ export const timetableReport = (id: string | undefined, timetables: Record<strin
   });
   const hoursPerWeek = Math.round(seconds / 360) / 10;
   const openDays = days.filter(d => d.length).length;
-  const status: TimetableReport['status'] = hoursPerWeek === 0 ? 'empty' : openDays < 5 ? 'partial' : 'ok';
+  days.forEach(d => d.sort((a, b) => a.start - b.start));
+  const status: TimetableReport['status'] = hoursPerWeek === 0 && times === 0 ? 'empty' : openDays < 5 ? 'partial' : 'ok';
   const period = timetablePeriod(t);
   let nextInfo = '';
   if (t.next) {
     const n = timetableReport('next', { next: { id: 'next', name: 'next version', hours: { timespans: t.next.timespans } } });
-    nextInfo = ` · next version from ${fmtDate(t.next.from)}: ${n.hoursPerWeek} h / week`;
+    nextInfo = ` · next version from ${fmtDate(t.next.from)}: ${n.times ? `${n.times} time(s)` : `${n.hoursPerWeek} h`} / week`;
   }
   const extra = `${period ? ` · valid ${period}` : ''}${nextInfo}`;
-  const summary = (hoursPerWeek === 0
+  const slot = (x: { start: number; end: number }) => (x.end === x.start ? hhmm(x.start) : `${hhmm(x.start)}-${hhmm(x.end)}`);
+  const amount = [hoursPerWeek ? `${hoursPerWeek} h` : '', times ? `${times} time(s)` : ''].filter(Boolean).join(' + ');
+  const summary = (hoursPerWeek === 0 && times === 0
     ? `${t.name || id}: no weekly time span${exceptions.length ? ` (${exceptions.length} dated span(s) only)` : ''}${rawSpans(t).length === 0 ? ` — no time span found in the timetable (fields: ${Object.keys(t).join(', ')})` : ''}`
-    : `${t.name || id}: ${hoursPerWeek} h / week, ${openDays} day(s) · ${days.map((d, i) => (d.length ? `${DAYS[i]} ${d.map(x => `${hhmm(x.start)}-${hhmm(x.end)}`).join(',')}` : '')).filter(Boolean).join(' · ')}`) + extra;
-  return { status, days, hoursPerWeek, exceptions, summary };
+    : `${t.name || id}: ${amount} / week, ${openDays} day(s) · ${days.map((d, i) => (d.length ? `${DAYS[i]} ${d.map(slot).join(',')}` : '')).filter(Boolean).join(' · ')}`) + extra;
+  return { status, days, hoursPerWeek, times, exceptions, summary };
 };
 
 // Timetable problems of a route (empty / missing timetables), '' when none.
