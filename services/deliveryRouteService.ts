@@ -636,11 +636,26 @@ export const feesLabel = (r: DeliveryRoute) => {
   return entries.length ? entries.map(([k, v]) => `${k} ${v ?? 'null'}`).join(' · ') : '';
 };
 
-// ---- Every timetable of the site (GET /timetables, optional type filter)
-export const TIMETABLE_TYPES = ['endpoint_timetable', 'carrier_pickup_timetable', 'carrier_delivery_timetable', 'carrier_transit_timetable', 'execution_time_timetable', 'rule_timetable'];
+// ---- Carrier timetables of the site (GET /timetables filtered on each carrier type) and detail (GET /timetables/{id})
+export const TIMETABLE_TYPES = ['carrier_pickup_timetable', 'carrier_transit_timetable', 'carrier_delivery_timetable'];
 export const fetchAllTimetables = async (type?: string): Promise<Timetable[]> => {
-  const body = await get('/timetables', type ? { filters: { type } } : {});
-  return arrayIn(body, ['timetables']).filter((t: any) => t && t.id).map((t: any) => ({ ...t, id: String(t.id), source: '/timetables' }));
+  const types = type ? [type] : TIMETABLE_TYPES;
+  const out = new Map<string, Timetable>();
+  for (const t of types) {
+    const body = await get('/timetables', { filters: { type: t } });
+    arrayIn(body, ['timetables'])
+      // Sites that ignore the filter: the type is checked here too.
+      .filter((x: any) => x && x.id && (!x.type || x.type === t))
+      .forEach((x: any) => out.set(String(x.id), { ...x, id: String(x.id), type: x.type || t, source: '/timetables' }));
+  }
+  return [...out.values()];
+};
+
+export const fetchTimetableDetail = async (id: string): Promise<Timetable> => {
+  const body: any = await get(`/timetables/${encodeURIComponent(id)}`, {});
+  const t = body?.timetable || body;
+  if (!t || typeof t !== 'object') throw new Error(`GET /timetables/${id}: empty answer`);
+  return { ...t, id: String(t.id || id), source: `/timetables/${id}` };
 };
 
 // Where a timetable is used: routes (activity / pickup / delivery) and execution times.
