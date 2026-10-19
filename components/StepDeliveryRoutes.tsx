@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   deliveryConfigStore, loadDeliveryConfig, reloadTimetables, routeTimetableIds, matchZone, placeOfEndpoint, zoneSummary, carrierLabel, transitLabel,
-  fetchItemStock, savedImportStock, analyseDelivery, nextOpenings, TIMETABLE_KINDS, timetableReport, routeTimetableIssues, transitIssue, feesIssue, feesLabel, executionTimeIssue, endpointExecutionTimes, durationMinutes, VERDICT_LABELS, EndpointAnalysis, StockLine, Verdict, RouteEndpoint,
+  fetchItemStock, savedImportStock, analyseDelivery, nextOpenings, TIMETABLE_KINDS, timetableReport, routeTimetableIssues, transitIssue, feesIssue, feesLabel, executionTimeIssue, endpointExecutionTimes, durationMinutes, eventsForRoute, eventsForEndpoint, eventLabel, isClosing, VERDICT_LABELS, EndpointAnalysis, StockLine, Verdict, RouteEndpoint,
 } from '../services/deliveryRouteService';
 import { useApiTarget, missingTargetFields } from '../services/onestockClient';
 import DeliveryRoutesGraph from './DeliveryRoutesGraph';
@@ -192,6 +192,9 @@ const StepDeliveryRoutes: React.FC = () => {
                     <p>Carrier: <strong>{carrierLabel(route)}</strong>{transitLabel(route) && <> · transit <strong>{transitLabel(route)}</strong></>}</p>
                     <p>Transit time: min <strong>{route.minimum_transit_hours ?? '—'} h</strong> · max <strong>{route.maximum_transit_hours ?? '—'} h</strong>
                       {transitIssue(route) && <span className="ml-2 text-red-600 font-bold">⚠ {transitIssue(route)}</span>}</p>
+                    {eventsForRoute(route, config.scheduledEvents).length > 0 && (
+                      <div>{eventsForRoute(route, config.scheduledEvents).map(e => <p key={e.id} className={isClosing(e) ? 'text-red-600 font-bold' : 'text-amber-700'}>📅 {eventLabel(e)}</p>)}</div>
+                    )}
                     <p>Delivery fees (metric_values): <strong>{feesLabel(route) || 'not set'}</strong>
                       {feesIssue(route) && <span className="ml-2 text-red-600 font-bold">⚠ {feesIssue(route)}</span>}</p>
                     <div className="pt-2 border-t border-gray-100 space-y-2">
@@ -375,6 +378,12 @@ const StepDeliveryRoutes: React.FC = () => {
                               {a.opening && a.quantity > 0 && <p className="text-amber-700 font-bold">⚠ Opening hours: {a.opening}</p>}
                               {a.quantity > 0 && endpointExecutionTimes(a.endpoint as RouteEndpoint, config.executionTimes).map(et => ({ et, issue: executionTimeIssue(et, config.timetables) })).filter(x => x.issue).map(x => (
                                 <p key={`e-${x.et.id}`} className="text-amber-700">⚠ Execution time {x.et.id} ({x.et.operation}): {x.issue}</p>
+                              ))}
+                              {a.quantity > 0 && eventsForEndpoint(a.endpoint.id, config.scheduledEvents).filter(isClosing).map(e => (
+                                <p key={`ev-${e.id}`} className="text-red-600">📅 Stock point closed: {eventLabel(e)}</p>
+                              ))}
+                              {a.quantity > 0 && (a.deliveringRoutes.length ? a.deliveringRoutes : a.routes).flatMap(r => eventsForRoute(r, config.scheduledEvents).filter(isClosing).map(e => ({ r, e }))).map(({ r, e }) => (
+                                <p key={`rev-${r.id}-${e.id}`} className="text-red-600">📅 Route {r.id} closed: {eventLabel(e)}</p>
                               ))}
                               {a.quantity > 0 && (a.deliveringRoutes.length ? a.deliveringRoutes : a.routes).filter(r => feesIssue(r)).map(r => (
                                 <p key={`f-${r.id}`} className="text-red-600">⚠ Route {r.id} fees: {feesIssue(r)}</p>

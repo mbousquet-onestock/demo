@@ -72,6 +72,10 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
   **Timetables** view: carrier timetables only (`GET /timetables` filtered on carrier_pickup / carrier_transit /
   carrier_delivery_timetable), weekly view, dated spans, detail read with `GET /timetables/{id}` (JSON),
   where it is used (routes, execution times) and the referenced timetables that GET /timetables does not return.
+  **Scheduled events** (`GET /scheduledevents`, next 60 days by default, period selectable in the Timetables view):
+  dated exceptions (bank holidays, leaves, stock takes, special operations) with their timetable types, links (stock
+  points, zones, carriers, carrier options) and options; attached to the timetables / routes / stock points they apply
+  to, closures (`open: false`) reported in the analysis and as delivery promise causes.
   **Execution times** (`GET /execution_times`): operation, duration ("2h", "30m"), execution moment and timetable
   (weekly view), the stock points using them (when GET /endpoints returns their `execution_times`); unreadable durations,
   missing / empty timetables and always_at_start without timetable are flagged, in the analysis and as promise causes.

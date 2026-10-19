@@ -101,6 +101,19 @@ export interface ExecutionTime {
   used_options?: string[];
 }
 
+// Dated exception (bank holiday, leave, stock take…) applied to timetables (GET /scheduledevents).
+export interface ScheduledEvent {
+  id: string;
+  name?: string;
+  type?: string;
+  start?: number;
+  end?: number;
+  timezone?: string;
+  timetable_types?: string[];
+  links?: { endpoint_ids?: string[]; zone_ids?: string[]; carriers?: string[]; carrier_options?: string[] };
+  options?: { open?: boolean; claim_disabled?: boolean; stock_export_disabled?: boolean };
+}
+
 export interface DeliveryConfig {
   routes: DeliveryRoute[];
   zones: Zone[];
@@ -108,6 +121,9 @@ export interface DeliveryConfig {
   // Timetables used by the routes (opening / pickup / delivery), by id.
   timetables?: Record<string, Timetable>;
   executionTimes?: ExecutionTime[];
+  scheduledEvents?: ScheduledEvent[];
+  // Period of the scheduled events read (seconds).
+  eventsPeriod?: { from: number; to: number };
   loadedAt: string;
   site: string;
 }
@@ -168,7 +184,10 @@ export const loadDeliveryConfig = async (onProgress?: (text: string) => void): P
   onProgress?.('Reading timetables…');
   const ttIds = [...new Set([...routeTimetableIds(routes), ...executionTimes.map(e => e.timetable_id).filter(Boolean) as string[]])];
   const timetables = await fetchTimetables(ttIds).catch(() => ({}));
-  const config = { routes, zones, endpoints, timetables, executionTimes, loadedAt: new Date().toISOString(), site: getApiTarget().siteId };
+  onProgress?.('Reading scheduled events…');
+  const eventsPeriod = defaultEventsPeriod();
+  const scheduledEvents = await fetchScheduledEvents(eventsPeriod.from, eventsPeriod.to).catch(() => [] as ScheduledEvent[]);
+  const config = { routes, zones, endpoints, timetables, executionTimes, scheduledEvents, eventsPeriod, loadedAt: new Date().toISOString(), site: getApiTarget().siteId };
   deliveryConfigStore.set(config);
   return config;
 };
@@ -412,7 +431,8 @@ export const fetchTimetables = async (ids: string[]): Promise<Record<string, Tim
   const out: Record<string, Timetable> = {};
   if (ids.length === 0) return out;
   const keep = (id: string, versions: any[]) => {
-    const v = currentVersion(versions.filter(Boolean));
+    // Empty answers ({}) are not a timetable.
+    const v = currentVersion(versions.filter(x => x && typeof x === 'object' && Object.keys(x).length > 0));
     if (v && (!out[id] || rawSpans(v).length > 0)) out[id] = fromVersion(id, v, versions.length);
   };
   // 1. Versions of the listed timetables.
@@ -663,3 +683,55 @@ export const timetableUsages = (id: string, config: DeliveryConfig): string[] =>
   ...config.routes.flatMap(r => TIMETABLE_KINDS.filter(k => r[k.key] === id).map(k => `route ${r.id} (${k.label.toLowerCase()})`)),
   ...(config.executionTimes || []).filter(e => e.timetable_id === id).map(e => `execution time ${e.id}${e.operation ? ` (${e.operation})` : ''}`),
 ];
+
+// ---- Scheduled events (GET /scheduledevents): dated exceptions of the timetables
+export const EVENT_TIMETABLE_TYPES = ['carrier_pickup_timetable', 'carrier_transit_timetable', 'carrier_delivery_timetable', 'endpoint_timetable'];
+export const defaultEventsPeriod = (days = 60) => {
+  const now = Math.floor(Date.now() / 1000);
+  return { from: now - 86400, to: now + days * 86400 };
+};
+
+export const fetchScheduledEvents = async (from: number, to: number): Promise<ScheduledEvent[]> => {
+  const body = await get('/scheduledevents', { filters: { from, to, timetable_types: EVENT_TIMETABLE_TYPES } });
+  return arrayIn(body, ['scheduled_events', 'scheduledevents', 'events'])
+    .filter((e: any) => e && (e.id || e.start))
+    .map((e: any) => ({ ...e, id: String(e.id ?? `${e.name}-${e.start}`) }));
+};
+
+export const reloadScheduledEvents = async (config: DeliveryConfig, from: number, to: number): Promise<DeliveryConfig> => {
+  const scheduledEvents = await fetchScheduledEvents(from, to);
+  const next = { ...config, scheduledEvents, eventsPeriod: { from, to } };
+  deliveryConfigStore.set(next);
+  return next;
+};
+
+const hasLinks = (e: ScheduledEvent) => !!e.links && Object.values(e.links).some(v => Array.isArray(v) && v.length);
+const appliesToType = (e: ScheduledEvent, type?: string) => !e.timetable_types?.length || !type || e.timetable_types.includes(type);
+
+// Events of a route: its carrier (and option), its zones, or no link at all (whole site); carrier timetables only.
+export const eventsForRoute = (r: DeliveryRoute, events: ScheduledEvent[] | undefined): ScheduledEvent[] =>
+  (events || []).filter(e => {
+    if (e.timetable_types?.length && !e.timetable_types.some(t => t.startsWith('carrier_'))) return false;
+    if (!hasLinks(e)) return true;
+    const l = e.links!;
+    const carrierOk = l.carriers?.length ? l.carriers.includes(r.carrier?.name || '') && (!l.carrier_options?.length || l.carrier_options.includes(r.carrier?.option || '')) : false;
+    const optionOk = !l.carriers?.length && l.carrier_options?.length ? l.carrier_options.includes(r.carrier?.option || '') : false;
+    const zoneOk = l.zone_ids?.length ? [r.origin_zone_id, r.destination_zone_id].some(z => z && l.zone_ids!.includes(z)) : false;
+    return carrierOk || optionOk || zoneOk;
+  });
+
+// Events of a timetable: same type, and linked to a route using it (or to the whole site).
+export const eventsForTimetable = (t: Timetable, config: DeliveryConfig): ScheduledEvent[] => {
+  const routes = config.routes.filter(r => TIMETABLE_KINDS.some(k => r[k.key] === t.id));
+  return (config.scheduledEvents || []).filter(e => appliesToType(e, t.type)
+    && (!hasLinks(e) || routes.some(r => eventsForRoute(r, [e]).length)));
+};
+
+// Events of a stock point (its id in links.endpoint_ids, stock point timetables).
+export const eventsForEndpoint = (endpointId: string, events: ScheduledEvent[] | undefined): ScheduledEvent[] =>
+  (events || []).filter(e => e.links?.endpoint_ids?.includes(endpointId) && appliesToType(e, 'endpoint_timetable'));
+
+const dt = (t?: number) => (t ? new Date(t * 1000).toLocaleString([], { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '?');
+export const eventLabel = (e: ScheduledEvent) => `${e.name || e.id} (${e.type || 'event'}) ${dt(e.start)} → ${dt(e.end)}${e.options?.open === false ? ' · CLOSED' : e.options?.open ? ' · open' : ''}`;
+export const isClosing = (e: ScheduledEvent) => e.options?.open === false;
+export const isActiveNow = (e: ScheduledEvent) => { const now = Date.now() / 1000; return (e.start ?? 0) <= now && now <= (e.end ?? Infinity); };

@@ -4,7 +4,7 @@ import { fetchSalesChannels, SalesChannelInfo } from '../services/salesChannelSe
 import { settingsStore } from '../services/appStores';
 import { savePayload, getLastProject } from '../services/payloadStore';
 import StockViewCheck from './StockViewCheck';
-import { DeliveryConfig, EndpointAnalysis, carrierLabel, routeTimetableIssues, transitIssue, feesIssue, executionTimeIssue, endpointExecutionTimes, RouteEndpoint } from '../services/deliveryRouteService';
+import { DeliveryConfig, EndpointAnalysis, carrierLabel, routeTimetableIssues, transitIssue, feesIssue, executionTimeIssue, eventsForRoute, eventsForEndpoint, eventLabel, isClosing, endpointExecutionTimes, RouteEndpoint } from '../services/deliveryRouteService';
 
 interface Props {
   config: DeliveryConfig;
@@ -308,6 +308,15 @@ const DeliveryPromisePanel: React.FC<Props> = ({ config, itemId, country, zip, a
                       return issues.length
                         ? <p className="text-amber-800">Routes transit / timetables: {issues.map(x => `${x.r.id} (${carrierLabel(x.r)}) — ${x.issue}`).join(' ; ')}.</p>
                         : routes.length ? <p className="text-gray-700">The transit times and timetables of the {routes.length} route(s) from the stock are set.</p> : null;
+                    })()}
+                    {['beyond_time_limit', 'no_eligible_route', 'missing_destination_timetable', 'no_stock'].includes(o.reason) && (() => {
+                      // Closures of the period (scheduled events): stock points with stock and their routes.
+                      const routes = [...new Map(withStock.flatMap(a => (a.deliveringRoutes.length ? a.deliveringRoutes : a.routes)).map(r => [r.id, r])).values()];
+                      const closures = [
+                        ...withStock.flatMap(a => eventsForEndpoint(a.endpoint.id, config.scheduledEvents).filter(isClosing).map(e => `${(a.endpoint as any).name || a.endpoint.id}: ${eventLabel(e)}`)),
+                        ...routes.flatMap(r => eventsForRoute(r, config.scheduledEvents).filter(isClosing).map(e => `route ${r.id}: ${eventLabel(e)}`)),
+                      ];
+                      return closures.length ? <p className="text-red-700">Scheduled closures: {[...new Set(closures)].join(' ; ')}.</p> : null;
                     })()}
                     {['beyond_time_limit', 'no_eligible_route', 'missing_destination_timetable'].includes(o.reason) && (() => {
                       // Execution times of the stock points with stock when known, else every execution time of the site.
