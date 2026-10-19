@@ -3,7 +3,7 @@ import JSZip from 'jszip';
 import { Product, AppSettings, OrderBatch } from '../types';
 import {
   generateOrderPackages, generateOrderCustomers, priceMissingArticles, validateConfig, incrementId, hasPrice,
-  OrderGenerationConfig, OrderPackage, OrderStrategy, ORDER_STRATEGIES, OrderIds, nextFreeIds,
+  OrderGenerationConfig, OrderPackage, OrderStrategy, ORDER_STRATEGIES, OrderIds, nextFreeIds, channelsForCountry,
 } from '../services/orderService';
 import { fetchSalesChannels } from '../services/salesChannelService';
 import { getAiStatus, AiStatus } from '../services/aiService';
@@ -172,8 +172,18 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
     currency,
     salesChannels: channels.map(c => c.id),
     channelCurrencies: Object.fromEntries(channels.filter(c => c.currency).map(c => [c.id, c.currency!])),
+    channelCountries: settings.channelCountries || {},
     deliveryPoints,
   };
+
+  // Countries of each sales channel, shared through the settings (database).
+  const [mapOpen, setMapOpen] = useState(false);
+  const channelCountries = settings.channelCountries || {};
+  const toggleChannelCountry = (channelId: string, code: string) => {
+    const list = channelCountries[channelId] || [];
+    onUpdateSettings({ channelCountries: { ...channelCountries, [channelId]: list.includes(code) ? list.filter(c => c !== code) : [...list, code] } });
+  };
+  const channelsOf = (code: string) => channelsForCountry(fullConfig, code);
 
   const toggleStrategy = (s: OrderStrategy) =>
     set({ strategies: config.strategies.includes(s) ? config.strategies.filter(x => x !== s) : [...config.strategies, s] });
@@ -496,6 +506,45 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
                   ))}
                 </select>
                 {channelsError && <p className="text-[11px] text-red-600 mt-1 break-words">{channelsError}</p>}
+                {selectedCountries.length > 0 && channels.length > 0 && (
+                  <div className="mt-2 space-y-0.5">
+                    {selectedCountries.map(c => {
+                      const list = channelsOf(c.code);
+                      return (
+                        <p key={c.code} className={`text-[11px] ${list.length ? 'text-gray-500' : 'text-red-600 font-bold'}`}>
+                          {c.code} → {list.length ? (list.length === channels.length && !config.salesChannel ? 'any channel' : list.join(', ')) : 'no sales channel'}
+                        </p>
+                      );
+                    })}
+                  </div>
+                )}
+                <button onClick={() => setMapOpen(o => !o)} disabled={channels.length === 0} className="mt-2 text-[10px] font-bold text-onestock-blue hover:underline disabled:opacity-40">
+                  {mapOpen ? '▾' : '▸'} Countries per sales channel
+                </button>
+                {mapOpen && (
+                  <div className="mt-2 border border-gray-200 rounded-lg divide-y divide-gray-100">
+                    {channels.map(ch => {
+                      const list = channelCountries[ch.id] || [];
+                      return (
+                        <div key={ch.id} className="px-3 py-2">
+                          <p className="text-[11px] font-bold text-gray-700">{ch.id}{ch.name || ch.description ? <span className="font-normal text-gray-400"> — {ch.name || ch.description}</span> : null}
+                            <span className="ml-2 font-normal text-gray-400">{list.length ? `${list.length} country(ies)` : 'all countries'}</span></p>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {settings.deliveryCountries.map(c => (
+                              <button
+                                key={c.code}
+                                onClick={() => toggleChannelCountry(ch.id, c.code)}
+                                title={c.name}
+                                className={`px-2 py-0.5 text-[10px] font-bold rounded border ${list.includes(c.code) ? 'bg-onestock-blue text-white border-onestock-blue' : 'bg-white text-gray-500 border-gray-200 hover:border-onestock-blue'}`}
+                              >{c.code}</button>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <p className="px-3 py-2 text-[10px] text-gray-400">A channel without country serves every country. Each order takes a channel associated with its destination country.</p>
+                  </div>
+                )}
               </div>
             </div>
 

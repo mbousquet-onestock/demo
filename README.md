@@ -55,6 +55,8 @@ body are sent with the documented `POST` + `X-HTTP-Method-Override: GET` transpo
   Generated batches are saved under a project (synced to the database) and created in OneStock: parent orders with
   `POST /parent_orders` (v4) then sub-orders with `POST /orders` (v3 / v4), status per order and retry of the failed ones.
   Several saved batches can be merged into one (duplicate parent orders ignored, creation results kept).
+  Countries per sales channel (saved in the settings): each order takes a sales channel associated with its destination
+  country (a channel without country serves every country); a selected country without channel blocks the generation.
 - **Delivery Routes**: reads the Delivery Promise configuration of the selected site (`GET /delivery_routes`,
   `GET /zones`, `GET /endpoints`) and shows it: graph origin zones → destination zones (one colour per carrier, route
   detail with transit times, timetables and constraints), zones with their criteria and the stock points they contain.

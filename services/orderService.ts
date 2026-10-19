@@ -24,6 +24,8 @@ export interface OrderGenerationConfig {
   salesChannels: string[];
   // Currency of each sales channel, when known (used instead of `currency`).
   channelCurrencies?: Record<string, string>;
+  // Destination countries of each sales channel; a channel without countries serves every country.
+  channelCountries?: Record<string, string[]>;
   parentOrderId: string;
   // "{TYPE}" is replaced by the strategy of the sub-order (SFS, CKC, ROPIS).
   orderIdPrefix: string;
@@ -273,6 +275,13 @@ const STRATEGY_SETTINGS: Record<OrderStrategy, { types: string[]; deliveryMethod
   ropis: { types: ['ropis'], deliveryMethod: 'standard_ropis', shipping: 0 },
 };
 
+// Sales channels usable for an order to a country (fixed channel, else every channel), per channel countries.
+export const channelsForCountry = (config: OrderGenerationConfig, country: string): string[] =>
+  (config.salesChannel ? [config.salesChannel] : config.salesChannels).filter(ch => {
+    const list = config.channelCountries?.[ch];
+    return !list || list.length === 0 || list.includes(country);
+  });
+
 export const validateConfig = (config: OrderGenerationConfig, products: Product[]): string | null => {
   if (products.length === 0) return 'No article selected: select items in the Product Manager first.';
   if (config.strategies.length === 0) return 'Select at least one order strategy.';
@@ -282,6 +291,8 @@ export const validateConfig = (config: OrderGenerationConfig, products: Product[
   if (config.subOrdersMin > config.subOrdersMax || config.itemsMin > config.itemsMax || config.qtyMin > config.qtyMax) return 'A minimum is greater than its maximum.';
   if (config.strategies.some(s => s !== 'sfs') && config.deliveryPoints.length === 0) return 'CKC / ROPIS need at least one delivery point.';
   if (!config.salesChannel && config.salesChannels.length === 0) return 'No sales channel: load them from OneStock or type one.';
+  const orphan = config.countries.filter(c => channelsForCountry(config, c.code).length === 0);
+  if (orphan.length) return `No sales channel associated with ${orphan.map(c => c.name || c.code).join(', ')}${config.salesChannel ? ` (selected channel: ${config.salesChannel})` : ''}: associate the country with a channel, or unselect it.`;
   return null;
 };
 
@@ -314,7 +325,8 @@ export const generateOrderPackages = (
     const parentId = incrementId(config.parentOrderId, o);
     const country = customers[o]?.country || config.countries[o % config.countries.length];
     const customer = customers[o]?.customer || fallbackCustomer(country.code);
-    const salesChannel = config.salesChannel || pick(config.salesChannels);
+    // A sales channel associated with the destination country.
+    const salesChannel = pick(channelsForCountry(config, country.code)) || config.salesChannel || pick(config.salesChannels);
     const currency = config.channelCurrencies?.[salesChannel] || country.currency || config.currency;
     // Customer id (UUID) shared by every sub-order of the parent order.
     const customerId = newCustomerId();

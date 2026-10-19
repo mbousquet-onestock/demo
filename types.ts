@@ -156,6 +156,8 @@ export interface AppSettings {
   deliveryCountries: { code: string; name: string; currency?: string }[];
   // Sales channels last loaded with GET /sales_channels (Order Generator).
   salesChannelsCache?: { id: string; name?: string; description?: string; currency?: string }[];
+  // Countries of each sales channel (Order Generator); a channel without countries serves every country.
+  channelCountries?: Record<string, string[]>;
   // Collection points used for CKC / ROPIS generated orders.
   orderDeliveryPoints?: string[];
   // Next order ids of the Order Generator, shared by every browser (avoids re-using ids already sent to OneStock).
