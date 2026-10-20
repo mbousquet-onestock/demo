@@ -4,8 +4,10 @@ import { Product, AppSettings, OrderBatch } from '../types';
 import {
   generateOrderPackages, generateOrderCustomers, priceMissingArticles, validateConfig, incrementId, hasPrice,
   OrderGenerationConfig, OrderPackage, OrderStrategy, ORDER_STRATEGIES, OrderIds, nextFreeIds, channelsForCountry,
+  STRATEGY_SETTINGS, DEFAULT_DELIVERY_DAYS,
 } from '../services/orderService';
 import { fetchSalesChannels } from '../services/salesChannelService';
+import { fetchDeliveryMethods, DeliveryMethodInfo } from '../services/deliveryConfigService';
 import { getAiStatus, AiStatus } from '../services/aiService';
 import { mergeIds } from '../utils/endpointUtils';
 import { orderBatchesStore } from '../services/appStores';
@@ -54,6 +56,8 @@ const loadConfig = (settings: AppSettings): StoredConfig => {
     parentOrderId: defaultParentId(),
     orderIdPrefix: '{TYPE}-',
     startIndex: 1,
+    deliveryMethods: {},
+    deliveryDays: DEFAULT_DELIVERY_DAYS,
   };
   try {
     const stored = JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}');
@@ -142,6 +146,21 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
   };
   // First visit: load the sales channels from OneStock.
   useEffect(() => { if (channels.length === 0) loadChannels(); }, []);
+
+  // Delivery methods of the site (GET /delivery_configs), chosen per strategy for "delivery_method".
+  const [methods, setMethods] = useState<DeliveryMethodInfo[]>([]);
+  const [loadingMethods, setLoadingMethods] = useState(false);
+  const [methodsError, setMethodsError] = useState<string | null>(null);
+  const loadMethods = async () => {
+    setLoadingMethods(true);
+    setMethodsError(null);
+    try { setMethods(await fetchDeliveryMethods()); } catch (err: any) { setMethodsError(err?.message || String(err)); } finally { setLoadingMethods(false); }
+  };
+  useEffect(() => { if (!targetMissing) loadMethods(); }, [target.siteId, target.baseUrl]);
+  const methodOf = (s: OrderStrategy) => config.deliveryMethods?.[s] || STRATEGY_SETTINGS[s].deliveryMethod;
+  const setMethod = (s: OrderStrategy, m: string) => set({ deliveryMethods: { ...config.deliveryMethods, [s]: m } });
+  // Sales channels the orders may use, for the availability of each method.
+  const usedChannels = config.salesChannel ? [config.salesChannel] : channels.map(c => c.id);
 
   // Order ids are kept in the settings (database), shared by every browser.
   const ids: OrderIds = settings.orderIds || { parentOrderId: config.parentOrderId, orderIdPrefix: config.orderIdPrefix, startIndex: config.startIndex };
@@ -554,6 +573,40 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
                   </div>
                 )}
               </div>
+            </div>
+
+            <div className="pt-4 border-t border-gray-100 space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">Delivery</label>
+                <button onClick={loadMethods} disabled={loadingMethods || !!targetMissing} className="text-[10px] font-bold text-onestock-blue hover:underline disabled:opacity-50">{loadingMethods ? 'Loading…' : '↻ Reload delivery methods'}</button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {config.strategies.map(s => {
+                  const value = methodOf(s);
+                  const info = methods.find(m => m.id === value);
+                  // A method configured for none of the channels the orders may use.
+                  const noChannel = info && info.salesChannels.length > 0 && usedChannels.length > 0 && !usedChannels.some(c => info.salesChannels.includes(c));
+                  return (
+                    <div key={s}>
+                      <label className={labelTight}>delivery_method · {s.toUpperCase()}</label>
+                      <select value={value} onChange={e => setMethod(s, e.target.value)} className={inputClass + ' font-mono'}>
+                        {!methods.some(m => m.id === value) && <option value={value}>{value}{methods.length ? ' (not in the delivery configs)' : ''}</option>}
+                        {methods.map(m => (
+                          <option key={m.id} value={m.id}>{m.id}{m.salesChannels.length ? ` — ${m.salesChannels.join(', ')}` : ''}</option>
+                        ))}
+                      </select>
+                      {noChannel && <p className="text-[10px] text-amber-700 mt-1">Not configured for {config.salesChannel || 'the loaded sales channels'} (configs: {info!.salesChannels.join(', ')})</p>}
+                      {methods.length > 0 && !info && <p className="text-[10px] text-amber-700 mt-1">Not returned by GET /delivery_configs</p>}
+                    </div>
+                  );
+                })}
+                <div>
+                  <label className={labelTight}>Delivery time (days)</label>
+                  <input type="number" min={0} max={60} value={config.deliveryDays ?? DEFAULT_DELIVERY_DAYS} onChange={e => set({ deliveryDays: Math.max(0, parseInt(e.target.value) || 0) })} className={inputClass} />
+                  <p className="text-[10px] text-gray-400 mt-1">eta_end = order date + {config.deliveryDays ?? DEFAULT_DELIVERY_DAYS} day(s), eta_start one day before</p>
+                </div>
+              </div>
+              {methodsError && <p className="text-[11px] text-red-600 break-words">Delivery methods: {methodsError}</p>}
             </div>
 
             {needsPoints && (

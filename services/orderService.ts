@@ -32,7 +32,13 @@ export interface OrderGenerationConfig {
   startIndex: number;
   // Collection points for CKC / ROPIS sub-orders.
   deliveryPoints: string[];
+  // delivery_method of each strategy (from GET /delivery_configs); default STRATEGY_SETTINGS.
+  deliveryMethods?: Partial<Record<OrderStrategy, string>>;
+  // Delivery time in days (eta_end = now + days); default DEFAULT_DELIVERY_DAYS.
+  deliveryDays?: number;
 }
+
+export const DEFAULT_DELIVERY_DAYS = 3;
 
 export interface DestinationCountry {
   code: string;
@@ -269,7 +275,7 @@ export const nextFreeIds = (
   return { ids: { ...ids, parentOrderId, startIndex }, moved };
 };
 
-const STRATEGY_SETTINGS: Record<OrderStrategy, { types: string[]; deliveryMethod: string; shipping: number }> = {
+export const STRATEGY_SETTINGS: Record<OrderStrategy, { types: string[]; deliveryMethod: string; shipping: number }> = {
   sfs: { types: ['ffs'], deliveryMethod: 'standard_hd', shipping: 10 },
   ckc: { types: ['ffs', 'ckc'], deliveryMethod: 'standard_ckc', shipping: 0 },
   ropis: { types: ['ropis'], deliveryMethod: 'standard_ropis', shipping: 0 },
@@ -313,8 +319,10 @@ export const generateOrderPackages = (
   const now = Math.floor(Date.now() / 1000);
   const day = 86400;
   const cutoff = now + 3600 * 4;
-  const etaStart = now + day * 2;
-  const etaEnd = now + day * 5;
+  // Delivery on the last day of the delivery time (one-day window).
+  const days = Math.max(0, config.deliveryDays ?? DEFAULT_DELIVERY_DAYS);
+  const etaEnd = now + day * days;
+  const etaStart = Math.max(now, etaEnd - day);
   const email = 'alertes_os@onestock-retail.com';
   const unitPrice = (p: Product) => (hasPrice(p) ? round2(parseFloat(String(p.price).replace(',', '.'))) : aiPrices[p.sku] ?? 0);
 
@@ -393,7 +401,7 @@ export const generateOrderPackages = (
               carbon_footprint: 100,
               cost: st.shipping,
               cutoff,
-              delivery_method: st.deliveryMethod,
+              delivery_method: config.deliveryMethods?.[strategy]?.trim() || st.deliveryMethod,
               destination: { location: { country: country.code, zip_code: customer.address.zip_code } },
               eta_end: etaEnd,
               eta_start: etaStart,

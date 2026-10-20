@@ -52,7 +52,7 @@ const listIn = (body: any, key: string): any[] => {
 export const lastListAnswers: Record<string, { request: unknown; status: number | null; body: unknown }[]> = {};
 
 // GET with the fields first (DTC lists may only return the ids without them), then without (fields refused).
-const getWithFields = async (path: string, fields: string[], version?: number) => {
+export const getWithFields = async (path: string, fields: string[], version?: number) => {
   const attempts: Record<string, unknown>[] = [{ fields }, { filter: { fields } }, {}].map(b => (version ? { ...b, version } : b));
   const trace: { request: unknown; status: number | null; body: unknown }[] = [];
   let lastError: any = null;
