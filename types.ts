@@ -163,7 +163,7 @@ export interface AppSettings {
   // Collection points used for CKC / ROPIS generated orders.
   orderDeliveryPoints?: string[];
   // Next order ids of the Order Generator, shared by every browser (avoids re-using ids already sent to OneStock).
-  orderIds?: { parentOrderId: string; orderIdPrefix: string; startIndex: number };
+  orderIds?: { parentOrderId: string; orderIdPrefix: string; startIndex: number; reuseUsedIds?: boolean };
   rulesets: string[];
   defaultWeight: number;
   defaultHeight: number;

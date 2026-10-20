@@ -179,7 +179,9 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
     });
     return { parents, orders };
   }, [batches, batch]);
-  const idCheck = nextFreeIds(ids, usedIds.parents, usedIds.orders, config.orderCount, config.orderCount * config.subOrdersMax);
+  const freeIds = nextFreeIds(ids, usedIds.parents, usedIds.orders, config.orderCount, config.orderCount * config.subOrdersMax);
+  // After a reset the typed ids are kept, even if a saved batch already used them.
+  const idCheck = ids.reuseUsedIds ? { ids, moved: false } : freeIds;
 
   const missingPrices = useMemo(() => products.filter(p => !hasPrice(p)).length, [products]);
   const needsPoints = config.strategies.some(s => s !== 'sfs');
@@ -208,8 +210,8 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
   const resetCounters = () => {
     const now = new Date();
     const parentOrderId = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}000001`;
-    if (!window.confirm(`Reset the counters?\nParent order id: ${ids.parentOrderId} → ${parentOrderId}\nNext sub-order number: ${ids.startIndex} → 0\n\nIds already used by saved batches are still skipped at generation.`)) return;
-    setIds({ parentOrderId, startIndex: 0 });
+    if (!window.confirm(`Reset the counters?\nParent order id: ${ids.parentOrderId} → ${parentOrderId}\nNext sub-order number: ${ids.startIndex} → 0\n\nThese ids are used even if a saved batch already used them (they may already exist in OneStock).`)) return;
+    setIds({ parentOrderId, startIndex: 0, reuseUsedIds: true });
   };
 
   const toggleStrategy = (s: OrderStrategy) =>
@@ -267,7 +269,7 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
         }
       }
 
-      // Never reuse an id of a saved batch (it may already exist in OneStock).
+      // Ids of a saved batch are skipped (they may already exist in OneStock), unless kept after a reset.
       const free = idCheck;
       if (free.moved) warnings.push(`Ids ${ids.parentOrderId} / ${ids.startIndex} are already used by a saved batch: moved to ${free.ids.parentOrderId} / ${free.ids.startIndex}.`);
 
@@ -652,7 +654,7 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
               <input value={ids.orderIdPrefix} onChange={e => setIds({ orderIdPrefix: e.target.value })} className={inputClass + ' font-mono'} />
               <label className={labelTight + ' mt-3 sm:hidden'}>Next sub-order number</label>
               <input type="number" min={0} value={ids.startIndex} onChange={e => setIds({ startIndex: parseInt(e.target.value) || 0 })} className={inputClass + ' font-mono'} />
-              <p className="text-[10px] text-gray-400">Shared by all browsers · ids of saved batches are skipped</p>
+              <p className="text-[10px] text-gray-400">Shared by all browsers · {ids.reuseUsedIds ? 'ids kept as typed' : 'ids of saved batches are skipped'}</p>
               <p className="text-[10px] text-gray-400">{'{TYPE}'} → SFS / CKC / ROPIS</p>
               <p className="text-[10px] text-gray-400">Continues after each batch · next: <span className="font-mono">{previewId}</span></p>
             </div>
@@ -664,6 +666,15 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
                   Change the prefix or the numbers to use your own free ids.
                 </span>
                 <button onClick={() => setIds(idCheck.ids)} className="px-3 py-1.5 text-xs font-bold text-amber-800 border border-amber-300 rounded-lg hover:bg-amber-100">Use these ids</button>
+                <button onClick={() => setIds({ reuseUsedIds: true })} className="px-3 py-1.5 text-xs font-bold text-amber-800 border border-amber-300 rounded-lg hover:bg-amber-100">Keep my ids</button>
+              </div>
+            )}
+            {ids.reuseUsedIds && freeIds.moved && (
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800 flex flex-wrap items-center gap-2">
+                <span className="flex-1 min-w-[200px]">
+                  Ids kept as typed (counters reset): some were already used by a saved batch and may already exist in OneStock.
+                </span>
+                <button onClick={() => setIds({ reuseUsedIds: false })} className="px-3 py-1.5 text-xs font-bold text-blue-800 border border-blue-300 rounded-lg hover:bg-blue-100">Skip the used ids again</button>
               </div>
             )}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 p-4 bg-gray-50 rounded-xl border border-gray-100 items-center">

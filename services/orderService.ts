@@ -230,6 +230,8 @@ export interface OrderIds {
   parentOrderId: string;
   orderIdPrefix: string;
   startIndex: number;
+  // Keep the typed ids even when a saved batch already used them (after a counter reset).
+  reuseUsedIds?: boolean;
 }
 
 // A new batch never reuses a parent order or sub-order id of a saved batch (it may already exist in OneStock, which
