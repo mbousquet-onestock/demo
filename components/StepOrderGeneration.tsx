@@ -305,6 +305,24 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
     setDirty(true);
   };
 
+  // Payload edited by hand: key of the block (p-i parent, s-i-j sub-order), JSON text and parse error.
+  const [editing, setEditing] = useState<{ key: string; text: string; error?: string } | null>(null);
+  const applyEdit = (pkgIndex: number, subIndex: number | null, save: boolean) => {
+    if (!editing || !batch) return;
+    let body: any;
+    try { body = JSON.parse(editing.text); } catch (err: any) { setEditing({ ...editing, error: `Invalid JSON: ${err.message}` }); return; }
+    const error = !body || typeof body !== 'object' || Array.isArray(body) ? 'The payload must be a JSON object'
+      : subIndex === null ? (!body.parent_order?.id ? 'parent_order.id is required' : '')
+        : !body.order?.id ? 'order.id is required' : !Array.isArray(body.order?.types) ? 'order.types must be an array' : '';
+    if (error) { setEditing({ ...editing, error }); return; }
+    const next = batch.packages.map((pkg, i) => (i !== pkgIndex ? pkg
+      : subIndex === null ? { ...pkg, parent: body } : { ...pkg, subOrders: pkg.subOrders.map((o, j) => (j === subIndex ? body : o)) }));
+    const updated = { ...batch, packages: next };
+    setEditing(null);
+    if (save) { saveBatch(updated); setPushNotice('Payload changed and batch saved.'); }
+    else { setBatch(updated); setDirty(true); setPushNotice('Payload changed: save the batch to keep it.'); }
+  };
+
   const saveBatch = (toSave: OrderBatch | null = batch) => {
     if (!toSave) return null;
     const saved = { ...toSave, name: toSave.name.trim() || `Orders ${new Date().toLocaleString()}`, updatedAt: new Date().toISOString() };
@@ -803,18 +821,39 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
                   {pkg.country && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{pkg.country}</span>}
                   <span className="text-xs text-gray-600">{pkg.customer.first_name} {pkg.customer.last_name} · {pkg.customer.address.zip_code} {pkg.customer.address.city}</span>
                   <span className="text-xs text-gray-400">{pkg.subOrders.map(o => o.order.id).join(', ')}</span>
-                  <span className="ml-auto text-xs font-bold text-gray-700">{pkg.parent.parent_order.pricing_details.price} {pkg.parent.parent_order.pricing_details.currency}</span>
+                  <span className="ml-auto text-xs font-bold text-gray-700">{pkg.parent.parent_order.pricing_details?.price} {pkg.parent.parent_order.pricing_details?.currency}</span>
                 </button>
                 {isOpen && (
                   <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-gray-100 bg-gray-50">
-                    {[{ key: `p-${i}`, title: 'Parent order', body: pkg.parent, result: results[parentKey(pkg.parent.parent_order.id)] }, ...pkg.subOrders.map((o, j) => ({ key: `s-${i}-${j}`, title: `${o.order.id} · ${o.order.types.join('+').toUpperCase()}${o.order.delivery.destination.endpoint_id ? ` @ ${o.order.delivery.destination.endpoint_id}` : ''}`, body: o, result: results[orderKey(o.order.id)] }))].map(block => (
+                    {[{ key: `p-${i}`, sub: null as number | null, title: 'Parent order', body: pkg.parent, result: results[parentKey(pkg.parent.parent_order.id)] }, ...pkg.subOrders.map((o, j) => ({ key: `s-${i}-${j}`, sub: j as number | null, title: `${o.order.id} · ${(o.order.types || []).join('+').toUpperCase()}${o.order.delivery?.destination?.endpoint_id ? ` @ ${o.order.delivery.destination.endpoint_id}` : ''}`, body: o, result: results[orderKey(o.order.id)] }))].map(block => (
                       <div key={block.key} className="bg-[#001F4D] rounded-xl overflow-hidden border border-white/10">
                         <div className="px-4 py-2 bg-white/5 border-b border-white/10 flex justify-between items-center">
                           <span className="text-[10px] font-bold text-blue-300 uppercase tracking-widest flex items-center gap-2">{block.title} {statusBadge(block.result)}</span>
-                          <button onClick={() => handleCopy(block.body, block.key)} className="text-[10px] font-bold text-white/40 hover:text-white">{copyStatus === block.key ? 'COPIED!' : 'COPY'}</button>
+                          <span className="flex gap-3">
+                            {editing?.key !== block.key && <button onClick={() => setEditing({ key: block.key, text: JSON.stringify(block.body, null, 2) })} className="text-[10px] font-bold text-white/40 hover:text-white">EDIT</button>}
+                            <button onClick={() => handleCopy(block.body, block.key)} className="text-[10px] font-bold text-white/40 hover:text-white">{copyStatus === block.key ? 'COPIED!' : 'COPY'}</button>
+                          </span>
                         </div>
                         {block.result && !block.result.ok && <p className="px-4 pt-3 text-[11px] text-red-300 break-words">{block.result.message}{block.result.requestId ? ` · Request-Id ${block.result.requestId}` : ''}</p>}
-                        <pre className="p-4 max-h-60 overflow-y-auto text-[11px] font-mono text-blue-100">{JSON.stringify(block.body, null, 2)}</pre>
+                        {editing?.key === block.key ? (
+                          <div className="p-3 space-y-2">
+                            <textarea
+                              value={editing.text}
+                              onChange={e => setEditing({ key: block.key, text: e.target.value })}
+                              spellCheck={false}
+                              rows={18}
+                              className="w-full p-3 text-[11px] font-mono text-blue-50 bg-black/30 border border-white/20 rounded-lg outline-none focus:border-blue-300"
+                            />
+                            {editing.error && <p className="text-[11px] text-red-300">{editing.error}</p>}
+                            <div className="flex flex-wrap gap-2">
+                              <button onClick={() => applyEdit(i, block.sub, true)} className="px-3 py-1.5 text-[11px] font-bold text-[#001F4D] bg-white rounded-lg hover:bg-blue-50">Apply & save batch</button>
+                              <button onClick={() => applyEdit(i, block.sub, false)} className="px-3 py-1.5 text-[11px] font-bold text-white border border-white/30 rounded-lg hover:bg-white/10">Apply</button>
+                              <button onClick={() => setEditing(null)} className="px-3 py-1.5 text-[11px] font-bold text-white/60 hover:text-white">Cancel</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <pre className="p-4 max-h-60 overflow-y-auto text-[11px] font-mono text-blue-100">{JSON.stringify(block.body, null, 2)}</pre>
+                        )}
                       </div>
                     ))}
                   </div>
