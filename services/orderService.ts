@@ -1,6 +1,6 @@
 import { SITE_ID_VAR, TOKEN_VAR } from './onestockClient';
 import { callAi } from './aiService';
-import { Product } from '../types';
+import { Product, InformationField } from '../types';
 
 export type OrderStrategy = 'sfs' | 'ckc' | 'ropis';
 export const ORDER_STRATEGIES: OrderStrategy[] = ['sfs', 'ckc', 'ropis'];
@@ -36,7 +36,23 @@ export interface OrderGenerationConfig {
   deliveryMethods?: Partial<Record<OrderStrategy, string>>;
   // Delivery time in days (eta_end = now + days); default DEFAULT_DELIVERY_DAYS.
   deliveryDays?: number;
+  // "information" of each order (header) and order line: one of the possible values drawn per key.
+  information?: { header: InformationField[]; lines: InformationField[] };
 }
+
+// Typed value: numbers, true / false, null and JSON objects / arrays are sent as such, the rest as text.
+export const informationValue = (raw: string): unknown => {
+  const v = raw.trim();
+  if (/^(-?\d+(\.\d+)?|true|false|null)$/.test(v) || /^[[{]/.test(v)) {
+    try { return JSON.parse(v); } catch { /* text */ }
+  }
+  return raw;
+};
+// One value drawn per key (fields without key or value are skipped).
+export const drawInformation = (fields: InformationField[] | undefined): Record<string, unknown> =>
+  Object.fromEntries((fields || [])
+    .filter(f => f.key.trim() && f.values.length)
+    .map(f => [f.key.trim(), informationValue(f.values[Math.floor(Math.random() * f.values.length)])]));
 
 export const DEFAULT_DELIVERY_DAYS = 3;
 
@@ -375,7 +391,7 @@ export const generateOrderPackages = (
           item_id: p.sku,
           quantity,
           pricing_details: { original_price: price, price, original_unit_price: unit, unit_price: unit },
-          information: {},
+          information: drawInformation(config.information?.lines),
         };
       });
 
@@ -416,6 +432,7 @@ export const generateOrderPackages = (
           pricing_details: { currency, address, price: total },
           order_items: orderItems,
           shipping_fees: [{ original_price: st.shipping, price: st.shipping }],
+          ...((config.information?.header || []).some(f => f.key.trim() && f.values.length) ? { information: drawInformation(config.information?.header) } : {}),
           ...(strategy === 'ckc' ? { sign_on_collect: true } : {}),
         },
       });

@@ -134,6 +134,17 @@ export interface ApiUrlProfile {
   url: string;
 }
 
+// A key of the "information" map and its possible values (one is drawn per order / line).
+export interface InformationField {
+  key: string;
+  values: string[];
+}
+
+export interface OrderInformation {
+  header: InformationField[];
+  lines: InformationField[];
+}
+
 export interface AppSettings {
   apiName: string;
   // Base URL of the OneStock API, e.g. https://c500.api.qualif.onestock-retail.com
@@ -160,6 +171,10 @@ export interface AppSettings {
   salesChannelsCache?: { id: string; name?: string; description?: string; currency?: string }[];
   // Countries of each sales channel (Order Generator); a channel without countries serves every country.
   channelCountries?: Record<string, string[]>;
+  // "information" fields of the generated orders (header) and order lines: key and possible values.
+  orderInformation?: OrderInformation;
+  // Information fields saved per project (loaded back in the Order Generator).
+  orderInformationProjects?: Record<string, OrderInformation>;
   // Collection points used for CKC / ROPIS generated orders.
   orderDeliveryPoints?: string[];
   // Next order ids of the Order Generator, shared by every browser (avoids re-using ids already sent to OneStock).

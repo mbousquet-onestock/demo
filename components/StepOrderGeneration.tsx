@@ -15,6 +15,7 @@ import { savedPayloadsStore, listProjects, getLastProject, setLastProject } from
 import { useApiTarget, missingTargetFields, isProductionTarget } from '../services/onestockClient';
 import { pushOrderPackages, parentKey, orderKey, OrderPushResult } from '../services/orderPushService';
 import StockPointsPicker from './StockPointsPicker';
+import OrderInformationEditor from './OrderInformationEditor';
 
 interface StepOrderGenerationProps {
   products: Product[];
@@ -195,6 +196,7 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
     channelCurrencies: Object.fromEntries(channels.filter(c => c.currency).map(c => [c.id, c.currency!])),
     channelCountries: settings.channelCountries || {},
     deliveryPoints,
+    information: settings.orderInformation,
   };
 
   // Countries of each sales channel, shared through the settings (database).
@@ -696,6 +698,15 @@ const StepOrderGeneration: React.FC<StepOrderGenerationProps> = ({ products, set
                 : <span className="text-xs text-gray-400">All selected articles have a price</span>}
             </div>
           </section>
+
+          <OrderInformationEditor
+            value={settings.orderInformation || { header: [], lines: [] }}
+            onChange={orderInformation => onUpdateSettings({ orderInformation })}
+            saved={settings.orderInformationProjects || {}}
+            onSaveSaved={orderInformationProjects => onUpdateSettings({ orderInformationProjects })}
+            projects={projects}
+            defaultProject={getLastProject()}
+          />
         </div>
 
         {/* Summary */}
