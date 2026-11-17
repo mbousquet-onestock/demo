@@ -6,6 +6,7 @@ import EditAssetModal from './EditAssetModal';
 import ProductEditModal from './ProductEditModal';
 import { RegenerateIdsDrawer, ItemsPushDrawer, SavedItemsPicker } from './ProductApiTools';
 import ProductCaptureDrawer from './ProductCaptureDrawer';
+import SiteItemsImporter from './SiteItemsImporter';
 import HostImagesButton from './HostImagesButton';
 import { getLastProject } from '../services/payloadStore';
 import { productImageUrls, replaceProductImages } from '../services/imageHosting';
@@ -53,6 +54,7 @@ const StepResults: React.FC<StepResultsProps> = ({
   const [isRegenerateOpen, setIsRegenerateOpen] = useState(false);
   const [isItemsPushOpen, setIsItemsPushOpen] = useState(false);
   const [isSavedItemsOpen, setIsSavedItemsOpen] = useState(false);
+  const [isSiteItemsOpen, setIsSiteItemsOpen] = useState(false);
   // Opened by the user, or when the capture bookmarklet sends products.
   const captureRequest = captureDrawerRequest.use();
   const [isCaptureOpen, setIsCaptureOpen] = useState(captureRequest > 0 && captureInboxStore.get().length > 0);
@@ -61,6 +63,7 @@ const StepResults: React.FC<StepResultsProps> = ({
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
   const addOptions = [
     { label: 'Load saved /items payloads', hint: 'A /items payload or a GET /items result saved in a project.', run: () => setIsSavedItemsOpen(true) },
+    { label: 'Import from another site', hint: 'GET /items on another site of API Settings (its own token).', run: () => setIsSiteItemsOpen(true) },
     { label: 'Capture from a website', hint: 'Product sheets of the client website, with images and variants.', run: () => setIsCaptureOpen(true) },
     { label: 'Add a product manually', hint: 'Fill in one article.', run: () => setEditingProduct('new') },
   ];
@@ -178,6 +181,14 @@ const StepResults: React.FC<StepResultsProps> = ({
           hasProducts={products.length > 0}
           onOpen={onOpenItems}
           onClose={() => setIsSavedItemsOpen(false)}
+        />
+      )}
+
+      {isSiteItemsOpen && (
+        <SiteItemsImporter
+          hasProducts={products.length > 0}
+          onOpen={(items, label, mode) => onOpenItems(items, label, mode)}
+          onClose={() => setIsSiteItemsOpen(false)}
         />
       )}
 
