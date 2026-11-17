@@ -4,6 +4,7 @@ import {
   getApiTarget, missingTargetFields, buildUrl, onestockRequest, describeCallError,
 } from '../services/onestockClient';
 import { activeProfiles, selectSite, selectUrl, resolveUrl, newProfileId, tokenOf, DEFAULT_API_URLS } from '../services/apiProfiles';
+import { loginSite, withSiteToken, hasCredentials } from '../services/loginService';
 
 interface ApiTargetSettingsProps {
   settings: AppSettings;
@@ -27,6 +28,23 @@ const ApiTargetSettings: React.FC<ApiTargetSettingsProps> = ({ settings, onSave 
   };
   const { sites, urls, tokens, site: activeSite, url: activeUrl } = activeProfiles(settings);
   const [shown, setShown] = useState<Set<string>>(new Set());
+  // POST /login per site: running site id, last result per site.
+  const [logging, setLogging] = useState<string | null>(null);
+  const [loginResults, setLoginResults] = useState<Record<string, { ok: boolean; text: string }>>({});
+  const generateToken = async (x: SiteProfile) => {
+    setLogging(x.id);
+    try {
+      const all = { ...settings, sites, apiUrls: urls, tokens };
+      const token = await loginSite(all, x);
+      onSave({ ...all, ...withSiteToken(all, x.id, token) });
+      const shared = x.tokenId && tokens.find(t => t.id === x.tokenId);
+      setLoginResults(r => ({ ...r, [x.id]: { ok: true, text: `Token generated ${new Date().toLocaleTimeString()}${shared ? ` (shared token "${shared.label || 'token'}" updated)` : ''}` } }));
+    } catch (err: any) {
+      setLoginResults(r => ({ ...r, [x.id]: { ok: false, text: err?.message || String(err) } }));
+    } finally {
+      setLogging(null);
+    }
+  };
 
   // Editing the selected site / URL / shared token also updates the values used by the calls.
   const saveSites = (next: SiteProfile[], nextTokens: ApiTokenProfile[] = tokens) => {
@@ -89,7 +107,8 @@ const ApiTargetSettings: React.FC<ApiTargetSettingsProps> = ({ settings, onSave 
         {sites.map(x => {
           const isActive = activeSite?.id === x.id;
           return (
-            <div key={x.id} className={`grid grid-cols-1 md:grid-cols-[1.2fr_0.8fr_2fr_auto] gap-2 items-center p-3 rounded-xl border ${isActive ? 'border-[#002D72] bg-blue-50/40' : 'border-gray-200'}`}>
+            <div key={x.id} className={`p-3 rounded-xl border space-y-2 ${isActive ? 'border-[#002D72] bg-blue-50/40' : 'border-gray-200'}`}>
+            <div className="grid grid-cols-1 md:grid-cols-[1.2fr_0.8fr_2fr_auto] gap-2 items-center">
               <input value={x.label} onChange={e => editSite(x.id, 'label', e.target.value)} placeholder="Label (e.g. Client X qualif)" className={cellInput} />
               <input value={x.siteId} onChange={e => editSite(x.id, 'siteId', e.target.value.trim())} placeholder="Site ID (c500)" className={cellInput + ' font-mono'} />
               <div className="flex gap-1">
@@ -126,6 +145,31 @@ const ApiTargetSettings: React.FC<ApiTargetSettingsProps> = ({ settings, onSave 
                   title="Delete"
                 >✕</button>
               </div>
+            </div>
+            {/* Credentials: token generated with POST /login (also automatically when a call is refused). */}
+            <div className="grid grid-cols-1 md:grid-cols-[1.2fr_1.2fr_auto_1fr] gap-2 items-center">
+              <input value={x.userId || ''} onChange={e => editSite(x.id, 'userId', e.target.value.trim())} placeholder="User (user_id)" autoComplete="off" className={cellInput} />
+              <div className="flex gap-1">
+                <input
+                  type={shown.has(`pwd-${x.id}`) ? 'text' : 'password'}
+                  value={x.password || ''}
+                  onChange={e => saveSites(sites.map(y => (y.id === x.id ? { ...y, password: e.target.value } : y)))}
+                  placeholder="Password"
+                  autoComplete="new-password"
+                  className={cellInput}
+                />
+                <button onClick={() => setShown(prev => { const n = new Set(prev); const k = `pwd-${x.id}`; n.has(k) ? n.delete(k) : n.add(k); return n; })} className="px-2 text-[10px] font-bold text-onestock-blue">{shown.has(`pwd-${x.id}`) ? 'Hide' : 'Show'}</button>
+              </div>
+              <button
+                onClick={() => generateToken(x)}
+                disabled={!x.siteId || !hasCredentials(x) || logging === x.id}
+                className="px-3 py-2 text-[11px] font-bold text-white bg-onestock-blue rounded-lg hover:bg-[#001F4D] disabled:opacity-40 whitespace-nowrap"
+                title="POST /login with this user and password; the token of the site is replaced"
+              >{logging === x.id ? 'Login…' : 'Generate token'}</button>
+              <span className={`text-[11px] break-words ${loginResults[x.id] ? (loginResults[x.id].ok ? 'text-green-700' : 'text-red-600') : 'text-gray-400'}`}>
+                {loginResults[x.id]?.text || (hasCredentials(x) ? 'Renewed automatically when the token is refused' : 'User + password: token generated with POST /login')}
+              </span>
+            </div>
             </div>
           );
         })}
@@ -229,8 +273,8 @@ const ApiTargetSettings: React.FC<ApiTargetSettingsProps> = ({ settings, onSave 
         )}
       </div>
       <p className="text-[11px] text-gray-400 mt-4">
-        Tokens are stored encrypted in the database (when the database is configured) and kept in this browser.
-        "Test token" checks the selected site; when a token expires, paste the new one in its site.
+        Tokens and passwords are stored encrypted in the database (when the database is configured) and kept in this browser.
+        "Test token" checks the selected site; when its token is refused, a site with a user and a password gets a new one with POST /login.
       </p>
     </div>
   );

@@ -118,6 +118,9 @@ export interface SiteProfile {
   token: string;
   // Shared token used by this site (ApiTokenProfile id).
   tokenId?: string;
+  // Credentials of POST /login, to generate the token (password stored encrypted in the database).
+  userId?: string;
+  password?: string;
 }
 
 // Token shared by several sites (stored encrypted in the database).

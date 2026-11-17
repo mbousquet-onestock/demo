@@ -154,15 +154,24 @@ export const onestockRequest = async ({
   const requestTemplate = injectAuth
     ? { site_id: SITE_ID_VAR, token: TOKEN_VAR, ...(body || {}) }
     : body || null;
-  const envelope = await proxyFetch(url, method, resolveVariables(requestTemplate, { site_id: target.siteId, token: target.token }));
+  let envelope = await proxyFetch(url, method, resolveVariables(requestTemplate, { site_id: target.siteId, token: target.token }));
+  // Token rejected: new token with the credentials of the selected site (POST /login), then the call once again.
+  if (isAuthError(envelope) && !/\/login$/.test(path)) {
+    const { refreshActiveToken } = await import('./loginService');
+    if (await refreshActiveToken()) {
+      const next = getApiTarget();
+      envelope = await proxyFetch(url, method, resolveVariables(requestTemplate, { site_id: next.siteId, token: next.token }));
+    }
+  }
   return { url, method, requestTemplate, envelope };
 };
 
+// OneStock answers 401, or 400 with "auth_error", when the token is rejected.
+const isAuthError = (envelope: ProxyResponseEnvelope) => envelope.status === 401 || (envelope.body as any)?.error === 'auth_error';
+
 // Error text for a failed call, with a hint when the token is rejected.
 export const describeCallError = (envelope: ProxyResponseEnvelope): string => {
-  // OneStock answers 401, or 400 with "auth_error", when the token is rejected.
-  const authError = envelope.status === 401 || (envelope.body as any)?.error === 'auth_error';
-  return authError
-    ? `${describeError(envelope)} → paste a new token in API Settings.`
+  return isAuthError(envelope)
+    ? `${describeError(envelope)} → generate a new token (user / password of the site) or paste one in API Settings.`
     : describeError(envelope);
 };
