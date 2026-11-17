@@ -1,6 +1,6 @@
 import { AppSettings, SiteProfile } from '../types';
 import { buildUrl, proxyFetch, describeError, hasRealValue, ProxyResponseEnvelope } from './onestockClient';
-import { activeProfiles, resolveUrl, tokenOf } from './apiProfiles';
+import { activeProfiles, siteBaseUrl, tokenOf } from './apiProfiles';
 import { loginSite, withSiteToken, hasCredentials } from './loginService';
 import { settingsStore } from './appStores';
 
@@ -20,10 +20,10 @@ const isAuthError = (e: ProxyResponseEnvelope) => e.status === 401 || (e.body as
 // A refused token is renewed with the site's user / password (POST /login) when it has them.
 export const fetchSiteItems = async (siteProfileId: string, query: SiteItemsQuery, onProgress?: (n: number) => void): Promise<any[]> => {
   let settings: AppSettings = settingsStore.get();
-  const { sites, tokens, url } = activeProfiles(settings);
+  const { sites, tokens } = activeProfiles(settings);
   const site: SiteProfile | undefined = sites.find(s => s.id === siteProfileId);
   if (!site || !hasRealValue(site.siteId)) throw new Error('Unknown site.');
-  const baseUrl = url ? resolveUrl(url.url, site.siteId) : settings.apiUrl.replace(/\/+$/, '');
+  const baseUrl = siteBaseUrl(settings, site);
   if (!/^https:\/\/[^/\s{}]+/i.test(baseUrl)) throw new Error(`No usable API URL for ${site.siteId}.`);
   const endpoint = buildUrl({ baseUrl, version: settings.apiVersion === 'v4' ? 'v4' : 'v3' }, '/items');
   let token = tokenOf(site, tokens);

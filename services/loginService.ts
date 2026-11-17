@@ -1,21 +1,16 @@
 import { AppSettings, SiteProfile } from '../types';
 import { buildUrl, proxyFetch, describeError, hasRealValue } from './onestockClient';
-import { activeProfiles, resolveUrl, tokenOf } from './apiProfiles';
+import { activeProfiles, siteBaseUrl, tokenOf } from './apiProfiles';
 import { settingsStore } from './appStores';
 
 export const hasCredentials = (site?: SiteProfile) => !!site?.userId?.trim() && !!site?.password;
 
-// API URL of a site: the selected URL entry rebuilt for this site, else the current API URL.
-const baseUrlOf = (settings: AppSettings, site: SiteProfile) => {
-  const { url } = activeProfiles(settings);
-  return url ? resolveUrl(url.url, site.siteId) : (settings.apiUrl || '').trim().replace(/\/+$/, '');
-};
 
 // POST /login {site_id, user_id, password} → token.
 export const loginSite = async (settings: AppSettings, site: SiteProfile): Promise<string> => {
   if (!hasRealValue(site.siteId)) throw new Error('No site ID.');
   if (!hasCredentials(site)) throw new Error('User and password required.');
-  const baseUrl = baseUrlOf(settings, site);
+  const baseUrl = siteBaseUrl(settings, site);
   if (!/^https:\/\/[^/\s{}]+/i.test(baseUrl)) throw new Error(`No usable API URL (${baseUrl || 'empty'}).`);
   const envelope = await proxyFetch(buildUrl({ baseUrl, version: settings.apiVersion || 'v3' }, '/login'), 'POST', {
     site_id: site.siteId.trim(),

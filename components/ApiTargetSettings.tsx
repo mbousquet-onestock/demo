@@ -50,7 +50,12 @@ const ApiTargetSettings: React.FC<ApiTargetSettingsProps> = ({ settings, onSave 
   const saveSites = (next: SiteProfile[], nextTokens: ApiTokenProfile[] = tokens) => {
     const patch: Partial<AppSettings> = { sites: next, apiUrls: urls, tokens: nextTokens };
     const active = activeSite && next.find(x => x.id === activeSite.id);
-    if (active) Object.assign(patch, { siteId: active.siteId, token: tokenOf(active, nextTokens), ...(activeUrl ? { apiUrl: resolveUrl(activeUrl.url, active.siteId) } : {}) });
+    if (active) {
+      // The selected site follows its own URL when it has one.
+      const own = active.urlId ? urls.find(u => u.id === active.urlId) : undefined;
+      const entry = own || activeUrl;
+      Object.assign(patch, { siteId: active.siteId, token: tokenOf(active, nextTokens), ...(entry ? { apiUrl: resolveUrl(entry.url, active.siteId), activeUrlId: entry.id } : {}) });
+    }
     set(patch);
   };
   const saveTokens = (next: ApiTokenProfile[]) =>
@@ -103,73 +108,108 @@ const ApiTargetSettings: React.FC<ApiTargetSettingsProps> = ({ settings, onSave 
           <h3 className={labelClass + ' mb-0'}>Sites (selected in the top bar)</h3>
           <button onClick={() => saveSites([...sites, { id: newProfileId(), label: '', siteId: '', token: '' }])} className="text-xs font-bold text-onestock-blue hover:underline">+ Add a site</button>
         </div>
-        {sites.length === 0 && <p className="text-xs text-gray-400">No site yet: add one with its label, site ID and token.</p>}
+        {sites.length === 0 && <p className="text-xs text-gray-400">No site yet: add one with its label, site ID, API URL and token (or user / password).</p>}
         {sites.map(x => {
           const isActive = activeSite?.id === x.id;
+          const urlEntry = (x.urlId && urls.find(u => u.id === x.urlId)) || activeUrl;
+          const resolved = urlEntry && x.siteId ? resolveUrl(urlEntry.url, x.siteId) : '';
+          const shared = x.tokenId ? tokens.find(t => t.id === x.tokenId) : undefined;
+          const hasToken = !!tokenOf(x, tokens);
+          const toggle = (k: string) => setShown(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n; });
           return (
-            <div key={x.id} className={`p-3 rounded-xl border space-y-2 ${isActive ? 'border-[#002D72] bg-blue-50/40' : 'border-gray-200'}`}>
-            <div className="grid grid-cols-1 md:grid-cols-[1.2fr_0.8fr_2fr_auto] gap-2 items-center">
-              <input value={x.label} onChange={e => editSite(x.id, 'label', e.target.value)} placeholder="Label (e.g. Client X qualif)" className={cellInput} />
-              <input value={x.siteId} onChange={e => editSite(x.id, 'siteId', e.target.value.trim())} placeholder="Site ID (c500)" className={cellInput + ' font-mono'} />
-              <div className="flex gap-1">
-                <select
-                  value={x.tokenId || ''}
-                  onChange={e => saveSites(sites.map(y => (y.id === x.id ? { ...y, tokenId: e.target.value || undefined } : y)))}
-                  className={cellInput + (x.tokenId ? '' : ' max-w-[150px]')}
-                  title="Own token of this site, or a token shared with other sites"
-                >
-                  <option value="">Own token</option>
-                  {tokens.map(t => <option key={t.id} value={t.id}>Shared: {t.label || 'token'}</option>)}
-                </select>
-                {!x.tokenId && (
-                  <>
-                    <input
-                      type={shown.has(x.id) ? 'text' : 'password'}
-                      value={x.token}
-                      onChange={e => editSite(x.id, 'token', e.target.value.trim())}
-                      placeholder="Token (POST /login)"
-                      autoComplete="off"
-                      className={cellInput + ' font-mono'}
-                    />
-                    <button onClick={() => setShown(prev => { const n = new Set(prev); n.has(x.id) ? n.delete(x.id) : n.add(x.id); return n; })} className="px-2 text-[10px] font-bold text-onestock-blue">{shown.has(x.id) ? 'Hide' : 'Show'}</button>
-                  </>
-                )}
-              </div>
-              <div className="flex items-center gap-2 justify-end">
+            <div key={x.id} className={`rounded-xl border overflow-hidden ${isActive ? 'border-[#002D72] shadow-sm' : 'border-gray-200'}`}>
+              {/* Header: label, site ID, state */}
+              <div className={`flex flex-wrap items-center gap-3 px-4 py-3 ${isActive ? 'bg-blue-50/60' : 'bg-gray-50/60'}`}>
+                <input value={x.label} onChange={e => editSite(x.id, 'label', e.target.value)} placeholder="Label (e.g. Client X qualif)" className="flex-1 min-w-[180px] px-2 py-1 text-base font-bold text-gray-900 bg-transparent border border-transparent rounded-lg outline-none hover:border-gray-200 focus:border-onestock-blue focus:bg-white" />
+                <label className="flex items-center gap-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                  Site ID
+                  <input value={x.siteId} onChange={e => editSite(x.id, 'siteId', e.target.value.trim())} placeholder="c500" className="w-28 px-2 py-1 text-sm font-mono font-bold normal-case tracking-normal text-[#002D72] bg-white border border-gray-200 rounded-lg outline-none focus:border-onestock-blue" />
+                </label>
+                <span className={`text-[10px] font-bold px-2 py-1 rounded ${hasToken ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>{hasToken ? 'Token set' : 'No token'}</span>
                 {isActive
-                  ? <span className="text-[10px] font-bold text-[#002D72] bg-blue-100 px-2 py-1 rounded">SELECTED</span>
-                  : <button onClick={() => set(selectSite({ ...settings, sites, apiUrls: urls, tokens }, x.id))} disabled={!x.siteId} className="px-2 py-1 text-[11px] font-bold text-onestock-blue border border-onestock-blue/40 rounded hover:bg-blue-50 disabled:opacity-40">Use</button>}
+                  ? <span className="text-[10px] font-bold text-white bg-[#002D72] px-2 py-1 rounded">SELECTED</span>
+                  : <button onClick={() => set(selectSite({ ...settings, sites, apiUrls: urls, tokens }, x.id))} disabled={!x.siteId} className="px-3 py-1 text-[11px] font-bold text-onestock-blue border border-onestock-blue/40 rounded-lg bg-white hover:bg-blue-50 disabled:opacity-40">Use</button>}
                 <button
                   onClick={() => window.confirm(`Delete the site "${x.label || x.siteId}"?`) && saveSites(sites.filter(y => y.id !== x.id))}
                   className="px-1.5 text-gray-400 hover:text-red-600"
                   title="Delete"
                 >✕</button>
               </div>
-            </div>
-            {/* Credentials: token generated with POST /login (also automatically when a call is refused). */}
-            <div className="grid grid-cols-1 md:grid-cols-[1.2fr_1.2fr_auto_1fr] gap-2 items-center">
-              <input value={x.userId || ''} onChange={e => editSite(x.id, 'userId', e.target.value.trim())} placeholder="User (user_id)" autoComplete="off" className={cellInput} />
-              <div className="flex gap-1">
-                <input
-                  type={shown.has(`pwd-${x.id}`) ? 'text' : 'password'}
-                  value={x.password || ''}
-                  onChange={e => saveSites(sites.map(y => (y.id === x.id ? { ...y, password: e.target.value } : y)))}
-                  placeholder="Password"
-                  autoComplete="new-password"
-                  className={cellInput}
-                />
-                <button onClick={() => setShown(prev => { const n = new Set(prev); const k = `pwd-${x.id}`; n.has(k) ? n.delete(k) : n.add(k); return n; })} className="px-2 text-[10px] font-bold text-onestock-blue">{shown.has(`pwd-${x.id}`) ? 'Hide' : 'Show'}</button>
+
+              <div className="divide-y divide-gray-100">
+                {/* API URL */}
+                <div className="grid grid-cols-1 md:grid-cols-[110px_1fr] gap-2 items-center px-4 py-2.5">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">API URL</span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select value={x.urlId || ''} onChange={e => saveSites(sites.map(y => (y.id === x.id ? { ...y, urlId: e.target.value || undefined } : y)))} className={cellInput + ' max-w-[220px]'}>
+                      <option value="">Top bar URL{activeUrl ? ` (${activeUrl.label || activeUrl.url})` : ''}</option>
+                      {urls.map(u => <option key={u.id} value={u.id}>{u.label || u.url}</option>)}
+                    </select>
+                    <span className="text-[11px] font-mono text-gray-500 break-all">{resolved || '—'}</span>
+                  </div>
+                </div>
+
+                {/* Token */}
+                <div className="grid grid-cols-1 md:grid-cols-[110px_1fr] gap-2 items-center px-4 py-2.5">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Token</span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      value={x.tokenId || ''}
+                      onChange={e => saveSites(sites.map(y => (y.id === x.id ? { ...y, tokenId: e.target.value || undefined } : y)))}
+                      className={cellInput + ' max-w-[220px]'}
+                      title="Own token of this site, or a token shared with other sites"
+                    >
+                      <option value="">Own token</option>
+                      {tokens.map(t => <option key={t.id} value={t.id}>Shared: {t.label || 'token'}</option>)}
+                    </select>
+                    {shared ? (
+                      <span className="text-[11px] text-gray-500">Shared with {sites.filter(y => y.tokenId === shared.id).length} site(s) · edited below</span>
+                    ) : (
+                      <div className="flex flex-1 min-w-[220px] gap-1">
+                        <input
+                          type={shown.has(x.id) ? 'text' : 'password'}
+                          value={x.token}
+                          onChange={e => editSite(x.id, 'token', e.target.value.trim())}
+                          placeholder="Token (POST /login)"
+                          autoComplete="off"
+                          className={cellInput + ' font-mono'}
+                        />
+                        <button onClick={() => toggle(x.id)} className="px-2 text-[10px] font-bold text-onestock-blue">{shown.has(x.id) ? 'Hide' : 'Show'}</button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Login: token generated with POST /login (also automatically when a call is refused). */}
+                <div className="grid grid-cols-1 md:grid-cols-[110px_1fr] gap-2 items-center px-4 py-2.5">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Login</span>
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input value={x.userId || ''} onChange={e => editSite(x.id, 'userId', e.target.value.trim())} placeholder="User (user_id)" autoComplete="off" className={cellInput + ' max-w-[220px]'} />
+                      <div className="flex gap-1 flex-1 min-w-[180px] max-w-[280px]">
+                        <input
+                          type={shown.has(`pwd-${x.id}`) ? 'text' : 'password'}
+                          value={x.password || ''}
+                          onChange={e => saveSites(sites.map(y => (y.id === x.id ? { ...y, password: e.target.value } : y)))}
+                          placeholder="Password"
+                          autoComplete="new-password"
+                          className={cellInput}
+                        />
+                        <button onClick={() => toggle(`pwd-${x.id}`)} className="px-2 text-[10px] font-bold text-onestock-blue">{shown.has(`pwd-${x.id}`) ? 'Hide' : 'Show'}</button>
+                      </div>
+                      <button
+                        onClick={() => generateToken(x)}
+                        disabled={!x.siteId || !hasCredentials(x) || logging === x.id}
+                        className="px-3 py-2 text-[11px] font-bold text-white bg-onestock-blue rounded-lg hover:bg-[#001F4D] disabled:opacity-40 whitespace-nowrap"
+                        title="POST /login with this user and password; the token of the site is replaced"
+                      >{logging === x.id ? 'Login…' : 'Generate token'}</button>
+                    </div>
+                    <p className={`text-[11px] break-words ${loginResults[x.id] ? (loginResults[x.id].ok ? 'text-green-700' : 'text-red-600') : 'text-gray-400'}`}>
+                      {loginResults[x.id]?.text || (hasCredentials(x) ? 'Token renewed automatically when a call is refused.' : 'With a user and a password, the token is generated with POST /login.')}
+                    </p>
+                  </div>
+                </div>
               </div>
-              <button
-                onClick={() => generateToken(x)}
-                disabled={!x.siteId || !hasCredentials(x) || logging === x.id}
-                className="px-3 py-2 text-[11px] font-bold text-white bg-onestock-blue rounded-lg hover:bg-[#001F4D] disabled:opacity-40 whitespace-nowrap"
-                title="POST /login with this user and password; the token of the site is replaced"
-              >{logging === x.id ? 'Login…' : 'Generate token'}</button>
-              <span className={`text-[11px] break-words ${loginResults[x.id] ? (loginResults[x.id].ok ? 'text-green-700' : 'text-red-600') : 'text-gray-400'}`}>
-                {loginResults[x.id]?.text || (hasCredentials(x) ? 'Renewed automatically when the token is refused' : 'User + password: token generated with POST /login')}
-              </span>
-            </div>
             </div>
           );
         })}

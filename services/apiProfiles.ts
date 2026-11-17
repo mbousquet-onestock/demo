@@ -38,12 +38,23 @@ export const activeProfiles = (settings: AppSettings) => {
   return { sites, urls, tokens, site, url };
 };
 
-// Settings patch selecting a site: its id / token, and the selected URL rebuilt for this site.
+// URL entry of a site: its own one, else the URL selected in the top bar.
+export const siteUrlEntry = (settings: AppSettings, site: SiteProfile): ApiUrlProfile | undefined => {
+  const { urls, url } = activeProfiles(settings);
+  return (site.urlId && urls.find(u => u.id === site.urlId)) || url || urls.find(u => u.id === settings.activeUrlId);
+};
+// API URL of a site (its URL entry rebuilt for its site ID, else the current API URL).
+export const siteBaseUrl = (settings: AppSettings, site: SiteProfile): string => {
+  const entry = siteUrlEntry(settings, site);
+  return entry ? resolveUrl(entry.url, site.siteId) : (settings.apiUrl || '').trim().replace(/\/+$/, '');
+};
+
+// Settings patch selecting a site: its id / token, and its URL (or the selected one) rebuilt for this site.
 export const selectSite = (settings: AppSettings, id: string): Partial<AppSettings> => {
-  const { sites, urls, tokens, url } = activeProfiles(settings);
+  const { sites, urls, tokens } = activeProfiles(settings);
   const site = sites.find(s => s.id === id);
   if (!site) return {};
-  const urlEntry = url || urls.find(u => u.id === settings.activeUrlId);
+  const urlEntry = siteUrlEntry(settings, site);
   return {
     sites, apiUrls: urls,
     activeSiteId: site.id, siteId: site.siteId, token: tokenOf(site, tokens),
@@ -51,8 +62,11 @@ export const selectSite = (settings: AppSettings, id: string): Partial<AppSettin
   };
 };
 
+// Selecting a URL in the top bar also makes it the URL of the selected site.
 export const selectUrl = (settings: AppSettings, id: string): Partial<AppSettings> => {
-  const { sites, urls } = profilesOf(settings);
+  const { sites, urls, site } = activeProfiles(settings);
   const u = urls.find(x => x.id === id);
-  return u ? { sites, apiUrls: urls, activeUrlId: u.id, apiUrl: resolveUrl(u.url, settings.siteId) } : {};
+  if (!u) return {};
+  const nextSites = site ? sites.map(s => (s.id === site.id ? { ...s, urlId: u.id } : s)) : sites;
+  return { sites: nextSites, apiUrls: urls, activeUrlId: u.id, apiUrl: resolveUrl(u.url, settings.siteId) };
 };

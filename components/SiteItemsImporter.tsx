@@ -54,7 +54,7 @@ const SiteItemsImporter: React.FC<Props> = ({ hasProducts, onOpen, onClose }) =>
       <div className="space-y-4">
         <p className="text-sm text-gray-500">
           Reads the items of a site of API Settings with <code className="text-xs bg-gray-100 px-1 rounded">GET /items</code>, with its own token
-          (renewed with its user / password when refused), on the API URL selected in the top bar.
+          (renewed with its user / password when refused), on its API URL.
         </p>
         {others.length === 0 ? (
           <p className="text-sm text-amber-700">No site in API Settings: add the source site there first.</p>
