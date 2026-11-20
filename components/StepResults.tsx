@@ -7,6 +7,7 @@ import ProductEditModal from './ProductEditModal';
 import { RegenerateIdsDrawer, ItemsPushDrawer, SavedItemsPicker } from './ProductApiTools';
 import ProductCaptureDrawer from './ProductCaptureDrawer';
 import SiteItemsImporter from './SiteItemsImporter';
+import CategoriesPushDrawer from './CategoriesPushDrawer';
 import HostImagesButton from './HostImagesButton';
 import { getLastProject } from '../services/payloadStore';
 import { productImageUrls, replaceProductImages } from '../services/imageHosting';
@@ -55,6 +56,7 @@ const StepResults: React.FC<StepResultsProps> = ({
   const [isItemsPushOpen, setIsItemsPushOpen] = useState(false);
   const [isSavedItemsOpen, setIsSavedItemsOpen] = useState(false);
   const [isSiteItemsOpen, setIsSiteItemsOpen] = useState(false);
+  const [isCategoriesOpen, setIsCategoriesOpen] = useState(false);
   // Opened by the user, or when the capture bookmarklet sends products.
   const captureRequest = captureDrawerRequest.use();
   const [isCaptureOpen, setIsCaptureOpen] = useState(captureRequest > 0 && captureInboxStore.get().length > 0);
@@ -200,6 +202,13 @@ const StepResults: React.FC<StepResultsProps> = ({
         />
       )}
 
+      {isCategoriesOpen && (
+        <CategoriesPushDrawer
+          products={products.filter(p => selectedIds.has(p.id))}
+          onClose={() => setIsCategoriesOpen(false)}
+        />
+      )}
+
       {isItemsPushOpen && (
         <ItemsPushDrawer
           products={products.filter(p => selectedIds.has(p.id))}
@@ -329,6 +338,15 @@ const StepResults: React.FC<StepResultsProps> = ({
               </>
             )}
           </div>
+
+          <button
+            onClick={() => setIsCategoriesOpen(true)}
+            disabled={selectedIds.size === 0}
+            title={selectedIds.size === 0 ? 'Select products first' : 'PUT /categories with the categories of the selected articles'}
+            className="px-4 py-2 text-xs font-bold text-emerald-700 border border-emerald-600 rounded-lg hover:bg-emerald-50 disabled:opacity-30"
+          >
+            Categories
+          </button>
 
           <button
             onClick={() => setIsItemsPushOpen(true)}
